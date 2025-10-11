@@ -6,4 +6,4 @@
 	url = https://github.com/mjbots/moteus_ros2
 [submodule "src/rl_autonomy/RoboSuite"]
 	path = src/rl_autonomy/RoboSuite
-	url = git@github.com:UBC-Snowbots/RoverFlake2.git
+	url = https://github.com/ARISE-Initiative/robosuite.git
