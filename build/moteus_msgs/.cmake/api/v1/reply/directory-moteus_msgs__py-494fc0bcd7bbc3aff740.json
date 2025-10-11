@@ -1,0 +1,14 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : [],
+		"nodes" : []
+	},
+	"installers" : [],
+	"paths" : 
+	{
+		"build" : "moteus_msgs__py",
+		"source" : "/RoverFlake2/build/moteus_msgs/moteus_msgs__py"
+	}
+}

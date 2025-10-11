@@ -1,0 +1,35 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from moteus_msgs/msg/PositionCommand.msg
+// generated code does not contain a copyright notice
+
+
+module moteus_msgs {
+  module msg {
+    @verbatim (language="comment", text=
+      "Empty lists will be treated as unset.  For non-empty fields," "\n"
+      "only the first element will be used.")
+    struct PositionCommand {
+      sequence<float> position;
+
+      sequence<float> velocity;
+
+      sequence<float> feedforward_torque;
+
+      sequence<float> kp_scale;
+
+      sequence<float> kd_scale;
+
+      sequence<float> maximum_torque;
+
+      sequence<float> stop_position;
+
+      sequence<float> watchdog_timeout;
+
+      sequence<float> velocity_limit;
+
+      sequence<float> accel_limit;
+
+      sequence<float> fixed_voltage_override;
+    };
+  };
+};

@@ -1,0 +1,40 @@
+[0.326s] Invoking command in '/RoverFlake2/src/external_pkgs/moteus_ros2/src/moteus_control': AMENT_PREFIX_PATH=/RoverFlake2/install/moteus_msgs:${AMENT_PREFIX_PATH} CMAKE_PREFIX_PATH=/RoverFlake2/install/moteus_msgs LD_LIBRARY_PATH=/RoverFlake2/install/moteus_msgs/lib:${LD_LIBRARY_PATH} PYTHONPATH=/RoverFlake2/build/moteus_control/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/RoverFlake2/install/moteus_control/lib/python3.10/site-packages:/RoverFlake2/install/moteus_msgs/local/lib/python3.10/dist-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../../../../build/moteus_control build --build-base /RoverFlake2/build/moteus_control/build install --record /RoverFlake2/build/moteus_control/install.log --single-version-externally-managed install_data
+[0.444s] running egg_info
+[0.444s] creating ../../../../../build/moteus_control/moteus_control.egg-info
+[0.444s] writing ../../../../../build/moteus_control/moteus_control.egg-info/PKG-INFO
+[0.445s] writing dependency_links to ../../../../../build/moteus_control/moteus_control.egg-info/dependency_links.txt
+[0.445s] writing entry points to ../../../../../build/moteus_control/moteus_control.egg-info/entry_points.txt
+[0.445s] writing requirements to ../../../../../build/moteus_control/moteus_control.egg-info/requires.txt
+[0.445s] writing top-level names to ../../../../../build/moteus_control/moteus_control.egg-info/top_level.txt
+[0.445s] writing manifest file '../../../../../build/moteus_control/moteus_control.egg-info/SOURCES.txt'
+[0.446s] reading manifest file '../../../../../build/moteus_control/moteus_control.egg-info/SOURCES.txt'
+[0.446s] adding license file 'LICENSE'
+[0.447s] writing manifest file '../../../../../build/moteus_control/moteus_control.egg-info/SOURCES.txt'
+[0.447s] running build
+[0.447s] running build_py
+[0.447s] creating /RoverFlake2/build/moteus_control/build
+[0.447s] creating /RoverFlake2/build/moteus_control/build/lib
+[0.447s] creating /RoverFlake2/build/moteus_control/build/lib/moteus_control
+[0.447s] copying moteus_control/moteus_node.py -> /RoverFlake2/build/moteus_control/build/lib/moteus_control
+[0.456s] copying moteus_control/__init__.py -> /RoverFlake2/build/moteus_control/build/lib/moteus_control
+[0.456s] running install
+[0.457s] running install_lib
+[0.457s] creating /RoverFlake2/install/moteus_control/lib/python3.10/site-packages/moteus_control
+[0.457s] copying /RoverFlake2/build/moteus_control/build/lib/moteus_control/moteus_node.py -> /RoverFlake2/install/moteus_control/lib/python3.10/site-packages/moteus_control
+[0.458s] copying /RoverFlake2/build/moteus_control/build/lib/moteus_control/__init__.py -> /RoverFlake2/install/moteus_control/lib/python3.10/site-packages/moteus_control
+[0.458s] byte-compiling /RoverFlake2/install/moteus_control/lib/python3.10/site-packages/moteus_control/moteus_node.py to moteus_node.cpython-310.pyc
+[0.459s] byte-compiling /RoverFlake2/install/moteus_control/lib/python3.10/site-packages/moteus_control/__init__.py to __init__.cpython-310.pyc
+[0.459s] running install_data
+[0.459s] creating /RoverFlake2/install/moteus_control/share/ament_index
+[0.459s] creating /RoverFlake2/install/moteus_control/share/ament_index/resource_index
+[0.459s] creating /RoverFlake2/install/moteus_control/share/ament_index/resource_index/packages
+[0.459s] copying resource/moteus_control -> /RoverFlake2/install/moteus_control/share/ament_index/resource_index/packages
+[0.459s] copying package.xml -> /RoverFlake2/install/moteus_control/share/moteus_control
+[0.459s] creating /RoverFlake2/install/moteus_control/share/moteus_control/launch
+[0.459s] copying launch/example_launch.yaml -> /RoverFlake2/install/moteus_control/share/moteus_control/launch
+[0.459s] running install_egg_info
+[0.461s] Copying ../../../../../build/moteus_control/moteus_control.egg-info to /RoverFlake2/install/moteus_control/lib/python3.10/site-packages/moteus_control-0.0.0-py3.10.egg-info
+[0.461s] running install_scripts
+[0.473s] Installing moteus_node script to /RoverFlake2/install/moteus_control/lib/moteus_control
+[0.474s] writing list of installed files to '/RoverFlake2/build/moteus_control/install.log'
+[0.488s] Invoked command in '/RoverFlake2/src/external_pkgs/moteus_ros2/src/moteus_control' returned '0': AMENT_PREFIX_PATH=/RoverFlake2/install/moteus_msgs:${AMENT_PREFIX_PATH} CMAKE_PREFIX_PATH=/RoverFlake2/install/moteus_msgs LD_LIBRARY_PATH=/RoverFlake2/install/moteus_msgs/lib:${LD_LIBRARY_PATH} PYTHONPATH=/RoverFlake2/build/moteus_control/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/RoverFlake2/install/moteus_control/lib/python3.10/site-packages:/RoverFlake2/install/moteus_msgs/local/lib/python3.10/dist-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../../../../build/moteus_control build --build-base /RoverFlake2/build/moteus_control/build install --record /RoverFlake2/build/moteus_control/install.log --single-version-externally-managed install_data

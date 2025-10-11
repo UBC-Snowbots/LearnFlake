@@ -1,0 +1,6 @@
+Invoking command in '/RoverFlake2/build/serial': /usr/bin/cmake /RoverFlake2/src/external_pkgs/serial -DCATKIN_INSTALL_INTO_PREFIX_ROOT=0 -DCMAKE_INSTALL_PREFIX=/RoverFlake2/install/serial
+Invoked command in '/RoverFlake2/build/serial' returned '0': /usr/bin/cmake /RoverFlake2/src/external_pkgs/serial -DCATKIN_INSTALL_INTO_PREFIX_ROOT=0 -DCMAKE_INSTALL_PREFIX=/RoverFlake2/install/serial
+Invoking command in '/RoverFlake2/build/serial': /usr/bin/cmake --build /RoverFlake2/build/serial -- -j16 -l16
+Invoked command in '/RoverFlake2/build/serial' returned '0': /usr/bin/cmake --build /RoverFlake2/build/serial -- -j16 -l16
+Invoking command in '/RoverFlake2/build/serial': /usr/bin/cmake --install /RoverFlake2/build/serial
+Invoked command in '/RoverFlake2/build/serial' returned '0': /usr/bin/cmake --install /RoverFlake2/build/serial

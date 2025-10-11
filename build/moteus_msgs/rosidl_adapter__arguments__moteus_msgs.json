@@ -1,0 +1,7 @@
+{
+  "package_name": "moteus_msgs",
+  "non_idl_tuples": [
+    "/RoverFlake2/src/external_pkgs/moteus_ros2/src/moteus_msgs:msg/PositionCommand.msg",
+    "/RoverFlake2/src/external_pkgs/moteus_ros2/src/moteus_msgs:msg/ControllerState.msg"
+  ]
+}

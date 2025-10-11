@@ -1,0 +1,12 @@
+[submodule "src/external_pkgs/serial"]
+	path = src/external_pkgs/serial
+	url = https://github.com/RoverRobotics-forks/serial-ros2.git
+[submodule "src/external_pkgs/moteus_ros2"]
+	path = src/external_pkgs/moteus_ros2
+	url = https://github.com/mjbots/moteus_ros2
+[submodule "src/rl_autonomy/template_build/src/rl_autonomy/RoboSuite"]
+	path = src/rl_autonomy/template_build/src/rl_autonomy/RoboSuite
+	url = https://github.com/ARISE-Initiative/robosuite.git
+[submodule "src/rl_autonomy/RoboSuite"]
+	path = src/rl_autonomy/RoboSuite
+	url = git@github.com:UBC-Snowbots/RoverFlake2.git

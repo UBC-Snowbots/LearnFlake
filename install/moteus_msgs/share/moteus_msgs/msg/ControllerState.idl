@@ -1,0 +1,30 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from moteus_msgs/msg/ControllerState.msg
+// generated code does not contain a copyright notice
+
+
+module moteus_msgs {
+  module msg {
+    struct ControllerState {
+      uint8 mode;
+
+      float position;
+
+      float velocity;
+
+      float torque;
+
+      float motor_temperature;
+
+      uint8 trajectory_complete;
+
+      uint8 home_state;
+
+      float voltage;
+
+      float temperature;
+
+      uint8 fault_code;
+    };
+  };
+};

@@ -1,0 +1,6 @@
+Invoking command in '/RoverFlake2/build/moteus_msgs': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake /RoverFlake2/src/external_pkgs/moteus_ros2/src/moteus_msgs -DCMAKE_INSTALL_PREFIX=/RoverFlake2/install/moteus_msgs
+Invoked command in '/RoverFlake2/build/moteus_msgs' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake /RoverFlake2/src/external_pkgs/moteus_ros2/src/moteus_msgs -DCMAKE_INSTALL_PREFIX=/RoverFlake2/install/moteus_msgs
+Invoking command in '/RoverFlake2/build/moteus_msgs': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --build /RoverFlake2/build/moteus_msgs -- -j16 -l16
+Invoked command in '/RoverFlake2/build/moteus_msgs' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --build /RoverFlake2/build/moteus_msgs -- -j16 -l16
+Invoking command in '/RoverFlake2/build/moteus_msgs': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --install /RoverFlake2/build/moteus_msgs
+Invoked command in '/RoverFlake2/build/moteus_msgs' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --install /RoverFlake2/build/moteus_msgs

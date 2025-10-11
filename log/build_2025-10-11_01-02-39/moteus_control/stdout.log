@@ -1,0 +1,38 @@
+running egg_info
+creating ../../../../../build/moteus_control/moteus_control.egg-info
+writing ../../../../../build/moteus_control/moteus_control.egg-info/PKG-INFO
+writing dependency_links to ../../../../../build/moteus_control/moteus_control.egg-info/dependency_links.txt
+writing entry points to ../../../../../build/moteus_control/moteus_control.egg-info/entry_points.txt
+writing requirements to ../../../../../build/moteus_control/moteus_control.egg-info/requires.txt
+writing top-level names to ../../../../../build/moteus_control/moteus_control.egg-info/top_level.txt
+writing manifest file '../../../../../build/moteus_control/moteus_control.egg-info/SOURCES.txt'
+reading manifest file '../../../../../build/moteus_control/moteus_control.egg-info/SOURCES.txt'
+adding license file 'LICENSE'
+writing manifest file '../../../../../build/moteus_control/moteus_control.egg-info/SOURCES.txt'
+running build
+running build_py
+creating /RoverFlake2/build/moteus_control/build
+creating /RoverFlake2/build/moteus_control/build/lib
+creating /RoverFlake2/build/moteus_control/build/lib/moteus_control
+copying moteus_control/moteus_node.py -> /RoverFlake2/build/moteus_control/build/lib/moteus_control
+copying moteus_control/__init__.py -> /RoverFlake2/build/moteus_control/build/lib/moteus_control
+running install
+running install_lib
+creating /RoverFlake2/install/moteus_control/lib/python3.10/site-packages/moteus_control
+copying /RoverFlake2/build/moteus_control/build/lib/moteus_control/moteus_node.py -> /RoverFlake2/install/moteus_control/lib/python3.10/site-packages/moteus_control
+copying /RoverFlake2/build/moteus_control/build/lib/moteus_control/__init__.py -> /RoverFlake2/install/moteus_control/lib/python3.10/site-packages/moteus_control
+byte-compiling /RoverFlake2/install/moteus_control/lib/python3.10/site-packages/moteus_control/moteus_node.py to moteus_node.cpython-310.pyc
+byte-compiling /RoverFlake2/install/moteus_control/lib/python3.10/site-packages/moteus_control/__init__.py to __init__.cpython-310.pyc
+running install_data
+creating /RoverFlake2/install/moteus_control/share/ament_index
+creating /RoverFlake2/install/moteus_control/share/ament_index/resource_index
+creating /RoverFlake2/install/moteus_control/share/ament_index/resource_index/packages
+copying resource/moteus_control -> /RoverFlake2/install/moteus_control/share/ament_index/resource_index/packages
+copying package.xml -> /RoverFlake2/install/moteus_control/share/moteus_control
+creating /RoverFlake2/install/moteus_control/share/moteus_control/launch
+copying launch/example_launch.yaml -> /RoverFlake2/install/moteus_control/share/moteus_control/launch
+running install_egg_info
+Copying ../../../../../build/moteus_control/moteus_control.egg-info to /RoverFlake2/install/moteus_control/lib/python3.10/site-packages/moteus_control-0.0.0-py3.10.egg-info
+running install_scripts
+Installing moteus_node script to /RoverFlake2/install/moteus_control/lib/moteus_control
+writing list of installed files to '/RoverFlake2/build/moteus_control/install.log'

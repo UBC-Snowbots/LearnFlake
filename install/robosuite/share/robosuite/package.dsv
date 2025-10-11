@@ -1,0 +1,3 @@
+source;share/robosuite/hook/pythonpath.ps1
+source;share/robosuite/hook/pythonpath.dsv
+source;share/robosuite/hook/pythonpath.sh

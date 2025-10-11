@@ -1,0 +1,11 @@
+/RoverFlake2/build/serial/CMakeFiles/uninstall.dir
+/RoverFlake2/build/serial/CMakeFiles/serial_uninstall.dir
+/RoverFlake2/build/serial/CMakeFiles/serial.dir
+/RoverFlake2/build/serial/CMakeFiles/serial_example.dir
+/RoverFlake2/build/serial/CMakeFiles/test.dir
+/RoverFlake2/build/serial/CMakeFiles/edit_cache.dir
+/RoverFlake2/build/serial/CMakeFiles/rebuild_cache.dir
+/RoverFlake2/build/serial/CMakeFiles/list_install_components.dir
+/RoverFlake2/build/serial/CMakeFiles/install.dir
+/RoverFlake2/build/serial/CMakeFiles/install/local.dir
+/RoverFlake2/build/serial/CMakeFiles/install/strip.dir
