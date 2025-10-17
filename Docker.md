@@ -2,6 +2,22 @@
 
 This guide will help you learn how to build images, run containers, create new containers, and also if you want, learn what happens behind the scenes. Ask Aaron if you need anymore help with using Docker. Keep in mind, I only added `docker-compose.yml` so that you can avoid having to add a million flags after docker run but if you prefer to create containers manually, go ahead. 
 
+# Common workflow (for the lazies)
+Running a new container
+```bash
+  docker compose build <service> # build image
+  docker compose run <service> # create/run new container
+```
+Stopping and exiting the current container
+```bash
+  exit # type inside the container, stops service
+```
+Going back in an existing stopped container
+```bash
+  docker start <service> # start the container again
+  docker exec <service> # go into the container
+```
+
 ### 1. Prerequisites
 - Install Docker and Docker Compose on your machine
 ```bash
@@ -16,7 +32,7 @@ docker image ls # allows you to see existing images
 docker ps # allows you to see running containers
 docker ps -a # allows you to see stopped containers
 docker build -t <image_name> . # don't forget the period
-docker run -it <image_name> bash # create a new container under an image
+docker run -it <image_name> bash # create a new container under an image and creates a bash terminal
 docker exec -it <image_name> # allows you to go into an existing container
 docker rm <image_name> # allows you to remove images
 docker rmi <contnainer_name> # allows you to remove containers
@@ -50,7 +66,7 @@ docker compose --version
 
 ### 3. Run the container
 ```bash
-docker compose run rover bash
+docker compose run <service> bash
 ```
 
 What is happening here:
@@ -59,12 +75,12 @@ What is happening here:
 Extra commands:
 ```bash
 docker compose up -d # boots up a detached container (avoid non-detached version)
-docker compose prune # removes dangling pointers to any images/containers
+docker system prune # removes dangling pointers to any images/containers
 ```
 
 ### 4. Go into an existing container
 ```bash
-docker compose exec rover bash # don't forge to change rover if you are using a diff container
+docker compose exec <service> bash # don't forge to change rover if you are using a diff container
 ```
 
 What is happening:
@@ -77,9 +93,15 @@ Equivalent commands:
 docker exec -it <container_name>
 ```
 
-### 4. Stop and remove the container
+### 4. Exit container (saves any installed dependencies)
 ```bash
-docker compose down
+exit # thats it
 ```
 
-Only use if you are completely done using the container
+### 5. Stop and remove containers
+```bash
+docker compose down # remove all containers
+docker stop <service> # removes specific container
+```
+
+Only use if you are completely done using the container and don't want to save any of the dependencies you thereforth downloaded.

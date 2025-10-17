@@ -1,5 +1,6 @@
 # Build with 'docker compose build'
 # Create and enter container with 'docker compose run rover bash'
+# Enter an existing running container with 'docker compose exec rover bash'
 # if you have anymore questions ask Aaron
 
 # official base image in docs
@@ -23,6 +24,7 @@ RUN apt-get update && apt-get install -y \
     bash \
     python3 \
     python3-pip \
+    python3-venv \
     python-is-python3 \
     build-essential \
     cmake \

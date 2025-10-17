@@ -25,3 +25,9 @@ Don't forget to install the following system drivers though:
     # Windows build
     # just chat it until I (Aaron) figure out how this stupid Windows crap works (apparently you need to use a WSL which is what I'm trying to avoid with Docker)
 ```
+
+Recommended to install a python virtual environment:
+```bash
+    python -m venv rover_rl
+    source rover_rl/bin/activate
+```

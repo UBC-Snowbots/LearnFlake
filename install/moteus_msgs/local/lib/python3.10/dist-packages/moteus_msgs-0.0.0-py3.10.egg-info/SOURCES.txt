@@ -1,6 +1,0 @@
-setup.py
-moteus_msgs/__init__.py
-moteus_msgs.egg-info/PKG-INFO
-moteus_msgs.egg-info/SOURCES.txt
-moteus_msgs.egg-info/dependency_links.txt
-moteus_msgs.egg-info/top_level.txt

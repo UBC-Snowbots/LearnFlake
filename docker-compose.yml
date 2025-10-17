@@ -30,43 +30,23 @@ services:
     environment:
       - ROVERFLAKE_ROOT=/RoverFlake2
     network_mode: host
-  rover_x11: # default container, add more containers by making more services
+
+  rover_rl: # Default image for RL autonomy
     build:
       context: .
       dockerfile: Dockerfile
-    image: roverflake2:dev
-    container_name: rover_dev
-    working_dir: /RoverFlake2
+    image: learnflake:rl
+    container_name: rover_rl
+    working_dir: /LearnFlake
     tty: true
     stdin_open: true
-    volumes: # Purpose: docker env watches for changes in repo and updates
-      # preferred method is to specify a directory
-      # e.g. '- ./node_practice:/RoverFlake2/node_practice'
-      # Bind-mount the whole repo into the container
-      - ./:/RoverFlake2
+    devices: # GPU
+      - /dev/dri:/dev/dri
+    volumes:
+      - ./:/LearnFlake
       - /tmp/.X11-unix:/tmp/.X11-unix # GUI compatibility
     environment:
       - DISPLAY=${DISPLAY}
-      - ROVERFLAKE_ROOT=/RoverFlake2
-      - MUJOCO_GL=glfw # or egl (headless GUI)
-    network_mode: host
-  rover_rl: # default container, add more containers by making more services
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: roverflake2:dev
-    container_name: rover_dev
-    working_dir: /RoverFlake2
-    tty: true
-    stdin_open: true
-    volumes: # Purpose: docker env watches for changes in repo and updates
-      # preferred method is to specify a directory
-      # e.g. '- ./node_practice:/RoverFlake2/node_practice'
-      # Bind-mount the whole repo into the container
-      - ./:/RoverFlake2
-      - /tmp/.X11-unix:/tmp/.X11-unix # GUI compatibility
-    environment:
-      - DISPLAY=${DISPLAY}
-      - ROVERFLAKE_ROOT=/RoverFlake2
+      - ROVERFLAKE_ROOT=/LearnFlake
       - MUJOCO_GL=glfw # or egl (headless GUI)
     network_mode: host

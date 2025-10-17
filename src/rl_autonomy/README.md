@@ -27,3 +27,16 @@ Then, in the virtual environment or in the docker container:
 ```bash
     pip install -r requirements.txt
 ```
+
+Note: If any of the submodule folders are empty, just run:
+```bash
+    git submodule update --init --recursive
+```
+
+## Quickstart: visualise the SimpleArm robot
+
+```bash
+PYTHONPATH=src python -m rl_autonomy.scripts.run_simple_arm
+```
+
+This opens the default robosuite `Lift` environment using the custom `SimpleArm` robot registered in `rl_autonomy`.

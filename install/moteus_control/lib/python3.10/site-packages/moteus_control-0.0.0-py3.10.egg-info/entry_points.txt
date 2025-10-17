@@ -1,3 +1,0 @@
-[console_scripts]
-moteus_node = moteus_control.moteus_node:main
-
