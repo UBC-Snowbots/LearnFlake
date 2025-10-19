@@ -55,7 +55,9 @@ class FaiveHand(ManipulatorModel):
         resolved_xml = _ensure_resolved_asset()
         super().__init__(str(resolved_xml), idn=idn)
         # Light damping to keep the many finger joints numerically stable
-        self.set_joint_attribute(attrib="damping", values=np.full(self.dof, 0.05))
+        self.set_joint_attribute(attrib="damping", values=np.full(len(self._joints), 0.05))
+        actuated_joints = set(self._actuators)
+        self._joints = [joint for joint in self._joints if joint in actuated_joints]
 
     @property
     def default_base(self):
@@ -78,7 +80,7 @@ class FaiveHand(ManipulatorModel):
         return {
             "bins": (0.0, 0.0, 0.0),
             "empty": (0.0, 0.0, 0.0),
-            "table": lambda table_length: (-table_length / 2 + 0.1, 0.0, 0.0),
+            "table": lambda table_length: (-0.1, 0.0, 0.86),
         }
 
     @property
