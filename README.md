@@ -15,8 +15,7 @@ Don't forget to install the following system drivers though:
 ```bash
     # Native ArchLinux build
     sudo pacman -Syu # update system packages
-    sudo pacman -S xorg-server
-    sudo pacman -S nvidia-container-toolkit # toolkit is required if you have a Nvidia GPU and want to use it in the container
+    sudo pacman -S xorg-server xorg-xhost nvidia-container-toolkit
 ```
 ```bash
     # Native Ubuntu/Debian build
