@@ -15,3 +15,5 @@ Otherwise you can just add your changes to this file:
 ```
 
 ### Image: rover_rl
+
+docker commit <service> <myusername>/roverflake2:<TAG>

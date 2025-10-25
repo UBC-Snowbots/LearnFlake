@@ -75,12 +75,13 @@ class FaiveHand(ManipulatorModel):
     def init_qpos(self):
         return np.zeros(self.dof)
 
+    
     @property
     def base_xpos_offset(self):
         return {
             "bins": (0.0, 0.0, 0.0),
             "empty": (0.0, 0.0, 0.0),
-            "table": lambda table_length: (-0.1, 0.0, 0.86),
+            "table": lambda table_length: (0.0, 0.02, 0.85),
         }
 
     @property

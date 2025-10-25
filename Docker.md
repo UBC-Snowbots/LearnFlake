@@ -6,7 +6,8 @@ This guide will help you learn how to build images, run containers, create new c
 Running a new container
 ```bash
   docker compose build <service> # build image
-  docker compose run <service> # create/run new container
+  docker compose --compatibility <service> -d # create new detached GPU-container 
+  docker compose exec <service> bash # exec into it
 ```
 Stopping and exiting the current container
 ```bash

@@ -6,7 +6,7 @@
     <default>
         
         
-        <geom rgba="1 1 1 1" type="mesh" density="662" friction="1 0.005 0.001" condim="3" margin="0.0005" contype="1" conaffinity="1" />
+        <geom rgba="0.3 0.6 0.95 1" type="mesh" density="662" friction="1 0.005 0.001" condim="3" margin="0.0005" contype="1" conaffinity="1" />
         
         
         <joint type="hinge" limited="true" damping="0.05" armature="0.001" margin="0.01" frictionloss="0.001" />
@@ -213,6 +213,7 @@
             <geom mesh="middle_meta" />
             <geom mesh="ring_meta" />
             <geom mesh="pinky_meta" />
+            <site name="right_center" pos="0 0 0" size="0.01" rgba="1 0.3 0.3 1" group="2" />
             
             <body name="thumb_base">
                 <joint name="root2thumb_base" axis="0.297249628842018  -0.700414486434294  -0.648893061564281" pos="-0.029450000000000   0.061590000000000  -0.006270000000000" range="0 2.27" />

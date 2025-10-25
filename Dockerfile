@@ -9,7 +9,7 @@ FROM osrf/ros:humble-desktop
 # consistency with setup files
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
-ENV ROVERFLAKE_ROOT=/RoverFlake2
+ENV ROVERFLAKE_ROOT=/LearnFlake
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
 # install base depenencies (recommend not to change if you want to add niche deps)
@@ -30,6 +30,10 @@ RUN apt-get update && apt-get install -y \
     cmake \
     python3-colcon-common-extensions \
     ros-humble-rmw-cyclonedds-cpp \
+    libegl1 \
+    libglvnd0 \
+    libgles2 \
+    mesa-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # common ROS package dockerdeps (use this for niche deps)
@@ -55,6 +59,9 @@ RUN chmod +x /entrypoint.sh
 
 # Mujoco glfw/egl (change the mode in docker-compose.yml)
 ENV MUJOCO_GL=egl
+
+# Nvidia GPU support (this thing is so hard to integrate)
+ENV __GLX_VENDOR_LIBRARY_NAME=nvidia
 
 # changed with COPY
 ENTRYPOINT ["/entrypoint.sh"]
