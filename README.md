@@ -14,6 +14,7 @@ Don't forget to install the following system drivers though:
 - X11: A windowing system protocol and display server that manages how graphical applications render and display windows. We need this so that Docker knows what display protocol to use when you run RoboSuite in the container.
 ```bash
     # Native ArchLinux build
+    sudo pacman -Syu # update system packages
     sudo pacman -S xorg-server
     sudo pacman -S nvidia-container-toolkit # toolkit is required if you have a Nvidia GPU and want to use it in the container
 ```
