@@ -51,7 +51,8 @@ WORKDIR $ROVERFLAKE_ROOT
 COPY . $ROVERFLAKE_ROOT
 
 # run the full setup script (confirms everything including nested setup scripts)
-RUN yes | bash setup_scripts/setup_everything_common.sh
+RUN bash -x setup_scripts/setup_everything_prnv.sh
+# prnv change above
 
 # copy and set entrypoint (runs setup)
 COPY docker/entrypoint.sh /entrypoint.sh
