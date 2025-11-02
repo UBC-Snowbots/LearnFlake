@@ -51,6 +51,24 @@ services:
       - __GLX_VENDOR_LIBRARY_NAME=nvidia
     network_mode: host
 
+  rover_cpu:
+    container_name: rover_cpu
+    image: learnflake:cpu
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /LearnFlake
+    tty: true
+    stdin_open: true
+    environment:
+      - ROVERFLAKE_ROOT=/LearnFlake
+      - Display=${DISPLAY}
+      - MUJOCO_GL=egl # or glfw (headless GUI)
+    volumes:
+      - ./:/LearnFlake
+      - /tmp/.X11-unix:/tmp/.X11-unix # GUI compatibility
+    network_mode: host
+
   rover_gpu: # GPU (took me 4 hours to integrate)
     container_name: rover_gpu
     image: roverflake2:gpu
