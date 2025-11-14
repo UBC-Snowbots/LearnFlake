@@ -9,7 +9,7 @@ Initial checks (only run if you are using Docker)
 ```bash
     # Whitelists original directory because you can't create pointers to other repos (submodule creation) while in Docker 
     git config --global --add safe.directory /RoverFlake2
-```    
+```
 
 Before starting Docker container
 ```bash
