@@ -1,0 +1,7 @@
+matplotlib==3.8.2
+tensorboard==2.15.1
+termcolor==2.4.0
+h5py==3.10.0
+torch
+torchvision
+torchaudio

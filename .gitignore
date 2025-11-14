@@ -69,5 +69,5 @@ rl/
 
 .vscode/settings.json
 
-# Ignore rl_autonomy for now
-# src/rl_autonomy/
+# Ignore virtual environments
+src/rl_autonomy/rl/
