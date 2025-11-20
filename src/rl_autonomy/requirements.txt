@@ -1,3 +1,5 @@
+gym==0.23.0
+pybullet==3.2.6
 matplotlib==3.8.2
 tensorboard==2.15.1
 termcolor==2.4.0
