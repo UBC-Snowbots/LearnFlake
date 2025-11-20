@@ -6,15 +6,17 @@ Doing a minimalistic Mujoco-RoboSuite physics environment.
 If you want to create a virtual environment, go ahead but assuming you are in a docker container, there is no need (as long as you don't stop the container). 
 
 Initial checks (only run if you are using Docker)
-```bash
-    # Whitelists original directory because you can't create pointers to other repos (submodule creation) while in Docker 
-    git config --global --add safe.directory /RoverFlake2
-```
+> git config --global --add safe.directory /RoverFlake2
 
 Before starting Docker container
 ```bash
     xhost +local:docker # inside desired directory
-    docker compose exec <rover_compose> bash
+```
+
+Starting the docker container (post-build)
+```bash
+    docker compose --compatibility up rover_gpu -d
+    docker compose exec rover_gpu bash
 ```
 
 ```bash
@@ -25,7 +27,9 @@ Before starting Docker container
 
 Then, in the virtual environment or in the docker container:
 ```bash
+    cd src/external_pkgs/RoboSuite
     pip install -r requirements.txt
+    pip install -r requirements-extra.txt
 ```
 
 Note: If any of the submodule folders are empty, just run:
@@ -33,11 +37,10 @@ Note: If any of the submodule folders are empty, just run:
     git submodule update --init --recursive
 ```
 
-## Quickstart: visualise the SimpleArm robot
+## Quickstart: visualise the Rover2025 robot (old model)
 
 ```bash
 # cd into Robosuite (the submodule)
 python robosuite/demos/demo_random_action.py
 ```
 
-This opens the default robosuite `Lift` environment using the custom `SimpleArm` robot registered in `rl_autonomy`.
