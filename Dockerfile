@@ -51,7 +51,7 @@ WORKDIR $ROVERFLAKE_ROOT
 COPY . $ROVERFLAKE_ROOT
 
 # run the full setup script (confirms everything including nested setup scripts)
-RUN bash -x setup_scripts/setup_everything_prnv.sh
+RUN bash -x setup_scripts/setup_everything_common.sh
 # prnv change above
 
 # copy and set entrypoint (runs setup)
