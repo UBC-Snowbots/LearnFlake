@@ -8,16 +8,6 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 ROBO_PATH = os.path.join(ROOT, "..", "..", "external_pkgs", "RoboSuite")
 sys.path.insert(0, ROBO_PATH)
 
-"""Gripper interaction demo.
-
-This script illustrates the process of importing grippers into a scene and making it interact
-with the objects with actuators. It also shows how to procedurally generate a scene with the
-APIs of the MJCF utility functions.
-
-Example:
-    $ python run_gripper_test.py
-"""
-
 import xml.etree.ElementTree as ET
 
 from robosuite.models import MujocoWorldBase
