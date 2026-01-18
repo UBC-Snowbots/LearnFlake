@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(conda run:*)",
+      "Bash(powershell -Command \"& 'C:\\\\Users\\\\prana\\\\miniconda3\\\\envs\\\\Robosuite\\\\python.exe' -m pip install -e 'C:\\\\Users\\\\prana\\\\Desktop\\\\UBC Rover\\\\LearnFlake\\\\src\\\\external_pkgs\\\\RoboSuite'\":*)"
+    ]
+  }
+}
