@@ -29,13 +29,7 @@ def get_camera_image(obs, camera_name):
             break
             
     if img is not None:
-        # Flip vertically because Robosuite renders upside down for OpenCV sometimes
-        # Actually Robosuite returns (H, W, C) in standard convention, but let's check.
-        # It is usually RGB. OpenCV needs BGR.
         img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-        # Flip if necessary (Robosuite renderer mimics OpenGL, bottom-left origin?)
-        # Conventionally, we might need a flip. Let's try without first or flipUD.
-        # Usually it is correct.
         return img
     return None
 

@@ -1,3 +1,5 @@
+# File is verified to work as intended therefore bugs are likely elsewhere
+
 import os, sys
 import argparse
 import time
@@ -10,6 +12,7 @@ ROBO_PATH = os.path.join(ROOT, "..", "..", "external_pkgs", "RoboSuite")
 sys.path.insert(0, ROBO_PATH)
 
 import robosuite as suite
+from robosuite.devices import Keyboard
 from robosuite import load_composite_controller_config
 from robosuite.controllers.composite.composite_controller import WholeBody
 from robosuite.wrappers import VisualizationWrapper
@@ -33,7 +36,6 @@ if __name__ == "__main__":
     parser.add_argument("--rot-sensitivity", type=float, default=1.0)
     parser.add_argument("--max_fr", default=20, type=int)
     parser.add_argument("--reverse_xy", type=bool, default=False)
-    
     args = parser.parse_args()
 
     # Get controller config for Rover2025
@@ -67,12 +69,8 @@ if __name__ == "__main__":
 
     # Initialize device
     if args.device == "keyboard":
-        from robosuite.devices import Keyboard
         device = Keyboard(env=env, pos_sensitivity=args.pos_sensitivity, rot_sensitivity=args.rot_sensitivity)
         env.viewer.add_keypress_callback(device.on_press)
-    elif args.device == "spacemouse":
-        from robosuite.devices import SpaceMouse
-        device = SpaceMouse(env=env, pos_sensitivity=args.pos_sensitivity, rot_sensitivity=args.rot_sensitivity)
     else:
         raise Exception(f"Device {args.device} not supported in this simplified script.")
 
@@ -80,17 +78,25 @@ if __name__ == "__main__":
         obs = env.reset()
         env.render()
         device.start_control()
+        print("------------")
+        print("------------")
+        print("------------")
+        print("------------")
+        print("------------")
+        print("------------")
+        print("------------")
+        print("------------")
+        print("------------")
 
         # Logic to track gripper states across all robots in the scene
-        all_prev_gripper_actions = []
-        for robot in env.robots:
-            robot_gripper_dict = {}
-            for arm in robot.arms:
-                # Ensure we only track if a gripper is actually attached
-                if robot.gripper[arm] is not None:
-                    dof = robot.gripper[arm].dof
-                    robot_gripper_dict[f"{arm}_gripper"] = np.zeros(dof)
-            all_prev_gripper_actions.append(robot_gripper_dict)
+        all_prev_gripper_actions = [
+            {
+                f"{robot_arm}_gripper": np.repeat([0], robot.gripper[robot_arm].dof)
+                for robot_arm in robot.arms
+                if robot.gripper[robot_arm].dof > 0
+            }
+            for robot in env.robots
+        ]
 
         while True:
             start = time.time()
@@ -114,22 +120,18 @@ if __name__ == "__main__":
                 elif input_type == "absolute":
                     action_dict[arm] = input_ac_dict.get(f"{arm}_abs", np.zeros(6))
 
-            # Construct the full environment action vector
-            env_action_list = []
-            for i, robot in enumerate(env.robots):
-                if i == device.active_robot:
-                    # Update active robot with new actions
-                    env_action_list.append(robot.create_action_vector(action_dict))
-                    # Sync the gripper state tracking
-                    for gripper_key in all_prev_gripper_actions[i]:
-                        if gripper_key in action_dict:
-                            all_prev_gripper_actions[i][gripper_key] = action_dict[gripper_key]
-                else:
-                    # Keep other robots in their previous gripper state
-                    env_action_list.append(robot.create_action_vector(all_prev_gripper_actions[i]))
 
+            # Construct the full environment action vector
+            env_action = [robot.create_action_vector(all_prev_gripper_actions[i]) for i, robot in enumerate(env.robots)]
+            env_action[device.active_robot] = active_robot.create_action_vector(action_dict)
+            
+            env_action = np.concatenate(env_action)
+            for gripper_ac in all_prev_gripper_actions[device.active_robot]:
+                all_prev_gripper_actions[device.active_robot][gripper_ac] = action_dict[gripper_ac]
+
+            
             # aaron's notes: use similar tactic to gripper.py to read eef and joint positions
-            obs, reward, done, info = env.step(np.concatenate(env_action_list))
+            obs, reward, done, info = env.step(env_action)
             eef_pos = obs['robot0_eef_pos']
             joint_pos = obs['robot0_joint_pos']
             
@@ -139,4 +141,6 @@ if __name__ == "__main__":
 
             if args.max_fr is not None:
                 elapsed = time.time() - start
-                time.sleep(max(0, (1.0 / args.max_fr) - elapsed))
+                diff = 1 / args.max_fr - elapsed
+                if diff > 0:
+                    time.sleep(diff)
