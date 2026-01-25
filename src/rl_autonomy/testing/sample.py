@@ -1,9 +1,92 @@
-import os, sys
+"""Teleoperate robot with keyboard or SpaceMouse.
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
-ROBO_PATH = os.path.join(ROOT, "..", "..", "external_pkgs", "RoboSuite")
+***Choose user input option with the --device argument***
 
-sys.path.insert(0, ROBO_PATH)
+Keyboard:
+    We use the keyboard to control the end-effector of the robot.
+    The keyboard provides 6-DoF control commands through various keys.
+    The commands are mapped to joint velocities through an inverse kinematics
+    solver from Bullet physics.
+
+    Note:
+        To run this script with macOS, you must run it with root access.
+
+SpaceMouse:
+
+    We use the SpaceMouse 3D mouse to control the end-effector of the robot.
+    The mouse provides 6-DoF control commands. The commands are mapped to joint
+    velocities through an inverse kinematics solver from Bullet physics.
+
+    The two side buttons of SpaceMouse are used for controlling the grippers.
+
+    SpaceMouse Wireless from 3Dconnexion: https://www.3dconnexion.com/spacemouse_wireless/en/
+    We used the SpaceMouse Wireless in our experiments. The paper below used the same device
+    to collect human demonstrations for imitation learning.
+
+    Reinforcement and Imitation Learning for Diverse Visuomotor Skills
+    Yuke Zhu, Ziyu Wang, Josh Merel, Andrei Rusu, Tom Erez, Serkan Cabi, Saran Tunyasuvunakool,
+    János Kramár, Raia Hadsell, Nando de Freitas, Nicolas Heess
+    RSS 2018
+
+    Note:
+        This current implementation only supports macOS (Linux support can be added).
+        Download and install the driver before running the script:
+            https://www.3dconnexion.com/service/drivers.html
+
+Additionally, --pos_sensitivity and --rot_sensitivity provide relative gains for increasing / decreasing the user input
+device sensitivity
+
+
+***Choose controller with the --controller argument***
+
+Choice of using either inverse kinematics controller (ik) or operational space controller (osc):
+Main difference is that user inputs with ik's rotations are always taken relative to eef coordinate frame, whereas
+    user inputs with osc's rotations are taken relative to global frame (i.e.: static / camera frame of reference).
+
+
+***Choose environment specifics with the following arguments***
+
+    --environment: Task to perform, e.g.: "Lift", "TwoArmPegInHole", "NutAssembly", etc.
+
+    --robots: Robot(s) with which to perform the task. Can be any in
+        {"Panda", "Sawyer", "IIWA", "Jaco", "Kinova3", "UR5e", "Baxter"}. Note that the environments include sanity
+        checks, such that a "TwoArm..." environment will only accept either a 2-tuple of robot names or a single
+        bimanual robot name, according to the specified configuration (see below), and all other environments will
+        only accept a single single-armed robot name
+
+    --config: Exclusively applicable and only should be specified for "TwoArm..." environments. Specifies the robot
+        configuration desired for the task. Options are {"parallel" and "opposed"}
+
+            -"parallel": Sets up the environment such that two robots are stationed next to
+                each other facing the same direction. Expects a 2-tuple of robot names to be specified
+                in the --robots argument.
+
+            -"opposed": Sets up the environment such that two robots are stationed opposed from
+                each other, facing each other from opposite directions. Expects a 2-tuple of robot names
+                to be specified in the --robots argument.
+
+    --arm: Exclusively applicable and only should be specified for "TwoArm..." environments. Specifies which of the
+        multiple arm eef's to control. The other (passive) arm will remain stationary. Options are {"right", "left"}
+        (from the point of view of the robot(s) facing against the viewer direction)
+
+    --switch-on-grasp: Exclusively applicable and only should be specified for "TwoArm..." environments. If enabled,
+        will switch the current arm being controlled every time the gripper input is pressed
+
+    --toggle-camera-on-grasp: If enabled, gripper input presses will cycle through the available camera angles
+
+Examples:
+
+    For normal single-arm environment:
+        $ python demo_device_control.py --environment PickPlaceCan --robots Sawyer --controller osc
+
+    For two-arm bimanual environment:
+        $ python demo_device_control.py --environment TwoArmLift --robots Baxter --config bimanual --arm left --controller osc
+
+    For two-arm multi single-arm robot environment:
+        $ python demo_device_control.py --environment TwoArmLift --robots Sawyer Sawyer --config parallel --controller osc
+
+
+"""
 
 import argparse
 import time

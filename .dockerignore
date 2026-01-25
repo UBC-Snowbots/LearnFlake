@@ -1,0 +1,56 @@
+# --- Version Control (Critical for performance) ---
+.gitignore
+.gitattributes
+
+# --- Docker specifics ---
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# --- Python / RoboSuite junk ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+# If you have a local robosuite private macro file, ignore it if you set it up via script in Docker
+robosuite/macros.py 
+
+# --- ROS / Colcon (The 7GB killers) ---
+build/
+install/
+log/
+devel/
+devel_isolated/
+build_isolated/
+*.bag
+*.mcap
+
+# --- IDEs and Editor junk ---
+.vscode/
+.idea/
+*.swp
+*~
+.#*
+
+# --- Your specific ROS list ---
+network_stuff/dds_profile_cyclone.xml
+bin/
+lib/
+msg_gen/
+srv_gen/
+msg/*Action.msg
+msg/*ActionFeedback.msg
+msg/*ActionGoal.msg
+msg/*ActionResult.msg
+msg/*Feedback.msg
+msg/*Goal.msg
+msg/*Result.msg
+msg/_*.py
+srv/_*.py
+*.pcd
+qtcreator-*
+*.user
+CMakeLists.txt.user
