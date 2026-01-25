@@ -25,7 +25,7 @@ if __name__ == "__main__":
         "--robots",
         nargs="+",
         type=str,
-        default=["Rover2025"], 
+        default=["Rover2026"], 
         help="Which robot(s) to use in the env",
     )
     parser.add_argument("--config", type=str, default="default")
@@ -120,7 +120,6 @@ if __name__ == "__main__":
                 elif input_type == "absolute":
                     action_dict[arm] = input_ac_dict.get(f"{arm}_abs", np.zeros(6))
 
-
             # Construct the full environment action vector
             env_action = [robot.create_action_vector(all_prev_gripper_actions[i]) for i, robot in enumerate(env.robots)]
             env_action[device.active_robot] = active_robot.create_action_vector(action_dict)
@@ -128,7 +127,6 @@ if __name__ == "__main__":
             env_action = np.concatenate(env_action)
             for gripper_ac in all_prev_gripper_actions[device.active_robot]:
                 all_prev_gripper_actions[device.active_robot][gripper_ac] = action_dict[gripper_ac]
-
             
             # aaron's notes: use similar tactic to gripper.py to read eef and joint positions
             obs, reward, done, info = env.step(env_action)
