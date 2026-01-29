@@ -30,7 +30,8 @@ if __name__ == "__main__":
     )
     parser.add_argument("--config", type=str, default="default")
     parser.add_argument("--arm", type=str, default="right")
-    parser.add_argument("--controller", type=str, default=None)
+    parser.add_argument("--controller", type=str, default=None, 
+                        help="Controller type or path to .json config. Use 'ik' for IK_POSE controller.")
     parser.add_argument("--device", type=str, default="keyboard")
     parser.add_argument("--pos-sensitivity", type=float, default=1.0)
     parser.add_argument("--rot-sensitivity", type=float, default=1.0)
@@ -38,9 +39,17 @@ if __name__ == "__main__":
     parser.add_argument("--reverse_xy", type=bool, default=False)
     args = parser.parse_args()
 
-    # Get controller config for Rover2025
+    # Get controller config - support 'ik' shorthand for IK controller
+    controller_arg = args.controller
+    if controller_arg == "ik":
+        # Load robot-specific IK config
+        robot_name = args.robots[0].lower()
+        controller_arg = os.path.join(
+            ROBO_PATH, "robosuite", "controllers", "config", "robots", f"default_{robot_name}_ik.json"
+        )
+    
     controller_config = load_composite_controller_config(
-        controller=args.controller,
+        controller=controller_arg,
         robot=args.robots[0],
     )
 
