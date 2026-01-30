@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """
-SAC (Soft Actor-Critic) agent for training Rover2026 arm to lift objects.
+SAC (Soft Actor-Critic) Training for Rover2026 Arm
 
-This implements:
-- SAC algorithm with automatic entropy tuning
-- Actor-Critic neural networks
-- Replay buffer
-- Environment wrapper for RoboSuite
+Hardware Optimizations:
+- RTX 5070 Ti: BF16 mixed precision, torch.compile(), fused AdamW, GPU-resident replay buffer
+- Ryzen 9 9900X: Parallel environment sampling across 12 cores
 
 Usage:
-    python train_lift.py --train          # Train a new agent
-    python train_lift.py --eval model.pt  # Evaluate a trained model
+    python train_lift.py --train --cuda                    # Train with defaults
+    python train_lift.py --train --cuda --num_envs 12      # Custom parallelism  
+    python train_lift.py --eval checkpoints/best_model.pt  # Evaluate
 """
 
 import os
@@ -18,6 +17,7 @@ import sys
 import time
 import argparse
 import numpy as np
+import multiprocessing as mp
 from collections import deque
 from datetime import datetime
 
@@ -26,6 +26,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Normal
+from torch.cuda.amp import GradScaler
 
 # Path setup
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -37,62 +38,103 @@ from robosuite.controllers.composite.composite_controller_factory import refacto
 
 
 # ============================================================================
-# Replay Buffer
+# GPU-Resident Replay Buffer (Minimizes PCIe Bottleneck)
 # ============================================================================
 
-class ReplayBuffer:
-    """Experience replay buffer for off-policy learning with GPU optimization."""
+class GPUReplayBuffer:
+    """
+    Replay buffer that lives entirely on GPU VRAM.
+    Batched CPU->GPU transfers reduce PCIe overhead.
+    """
     
-    def __init__(self, capacity, obs_dim, action_dim, device='cpu'):
+    def __init__(self, capacity, obs_dim, action_dim, device='cuda'):
         self.capacity = capacity
         self.device = device
         self.ptr = 0
         self.size = 0
         
-        # Pre-allocate memory with pinned memory for faster GPU transfer
-        self.obs = np.zeros((capacity, obs_dim), dtype=np.float32)
-        self.actions = np.zeros((capacity, action_dim), dtype=np.float32)
-        self.rewards = np.zeros((capacity, 1), dtype=np.float32)
-        self.next_obs = np.zeros((capacity, obs_dim), dtype=np.float32)
-        self.dones = np.zeros((capacity, 1), dtype=np.float32)
+        # Pre-allocate GPU tensors
+        self.obs = torch.zeros((capacity, obs_dim), dtype=torch.float32, device=device)
+        self.actions = torch.zeros((capacity, action_dim), dtype=torch.float32, device=device)
+        self.rewards = torch.zeros((capacity, 1), dtype=torch.float32, device=device)
+        self.next_obs = torch.zeros((capacity, obs_dim), dtype=torch.float32, device=device)
+        self.dones = torch.zeros((capacity, 1), dtype=torch.float32, device=device)
         
-        # Pre-allocated tensors for batch sampling (avoids repeated allocation)
-        self._batch_obs = None
-        self._batch_size = 0
+        # CPU staging buffer with pinned memory for async transfers
+        self._buffer_size = 256
+        self._buffer_ptr = 0
+        self._obs_buf = torch.zeros((self._buffer_size, obs_dim), dtype=torch.float32, pin_memory=True)
+        self._act_buf = torch.zeros((self._buffer_size, action_dim), dtype=torch.float32, pin_memory=True)
+        self._rew_buf = torch.zeros((self._buffer_size, 1), dtype=torch.float32, pin_memory=True)
+        self._next_buf = torch.zeros((self._buffer_size, obs_dim), dtype=torch.float32, pin_memory=True)
+        self._done_buf = torch.zeros((self._buffer_size, 1), dtype=torch.float32, pin_memory=True)
+        
+        self._stream = torch.cuda.Stream(device=device)
     
     def add(self, obs, action, reward, next_obs, done):
-        self.obs[self.ptr] = obs
-        self.actions[self.ptr] = action
-        self.rewards[self.ptr] = reward
-        self.next_obs[self.ptr] = next_obs
-        self.dones[self.ptr] = done
+        """Stage transition in CPU buffer, flush to GPU when full."""
+        idx = self._buffer_ptr
+        self._obs_buf[idx] = torch.from_numpy(obs) if isinstance(obs, np.ndarray) else obs
+        self._act_buf[idx] = torch.from_numpy(action) if isinstance(action, np.ndarray) else action
+        self._rew_buf[idx, 0] = reward
+        self._next_buf[idx] = torch.from_numpy(next_obs) if isinstance(next_obs, np.ndarray) else next_obs
+        self._done_buf[idx, 0] = done
+        self._buffer_ptr += 1
         
-        self.ptr = (self.ptr + 1) % self.capacity
-        self.size = min(self.size + 1, self.capacity)
+        if self._buffer_ptr >= self._buffer_size:
+            self._flush()
+    
+    def _flush(self):
+        """Batch transfer staged data to GPU."""
+        if self._buffer_ptr == 0:
+            return
+        n = self._buffer_ptr
+        
+        with torch.cuda.stream(self._stream):
+            if self.ptr + n <= self.capacity:
+                end = self.ptr + n
+                self.obs[self.ptr:end] = self._obs_buf[:n].to(self.device, non_blocking=True)
+                self.actions[self.ptr:end] = self._act_buf[:n].to(self.device, non_blocking=True)
+                self.rewards[self.ptr:end] = self._rew_buf[:n].to(self.device, non_blocking=True)
+                self.next_obs[self.ptr:end] = self._next_buf[:n].to(self.device, non_blocking=True)
+                self.dones[self.ptr:end] = self._done_buf[:n].to(self.device, non_blocking=True)
+            else:
+                # Handle wrap-around
+                first = self.capacity - self.ptr
+                self.obs[self.ptr:] = self._obs_buf[:first].to(self.device, non_blocking=True)
+                self.obs[:n-first] = self._obs_buf[first:n].to(self.device, non_blocking=True)
+                self.actions[self.ptr:] = self._act_buf[:first].to(self.device, non_blocking=True)
+                self.actions[:n-first] = self._act_buf[first:n].to(self.device, non_blocking=True)
+                self.rewards[self.ptr:] = self._rew_buf[:first].to(self.device, non_blocking=True)
+                self.rewards[:n-first] = self._rew_buf[first:n].to(self.device, non_blocking=True)
+                self.next_obs[self.ptr:] = self._next_buf[:first].to(self.device, non_blocking=True)
+                self.next_obs[:n-first] = self._next_buf[first:n].to(self.device, non_blocking=True)
+                self.dones[self.ptr:] = self._done_buf[:first].to(self.device, non_blocking=True)
+                self.dones[:n-first] = self._done_buf[first:n].to(self.device, non_blocking=True)
+        
+        self.ptr = (self.ptr + n) % self.capacity
+        self.size = min(self.size + n, self.capacity)
+        self._buffer_ptr = 0
     
     def sample(self, batch_size):
-        idxs = np.random.randint(0, self.size, size=batch_size)
-        
-        # Use torch.from_numpy (zero-copy) + non_blocking transfer for speed
-        return (
-            torch.from_numpy(self.obs[idxs]).to(self.device, non_blocking=True),
-            torch.from_numpy(self.actions[idxs]).to(self.device, non_blocking=True),
-            torch.from_numpy(self.rewards[idxs]).to(self.device, non_blocking=True),
-            torch.from_numpy(self.next_obs[idxs]).to(self.device, non_blocking=True),
-            torch.from_numpy(self.dones[idxs]).to(self.device, non_blocking=True),
-        )
+        """Sample directly from GPU memory - zero PCIe overhead."""
+        if self._buffer_ptr > 0:
+            self._flush()
+        idxs = torch.randint(0, self.size, (batch_size,), device=self.device)
+        return self.obs[idxs], self.actions[idxs], self.rewards[idxs], self.next_obs[idxs], self.dones[idxs]
 
 
 # ============================================================================
-# Neural Networks
+# Neural Networks (Optimized for RTX 5070 Ti)
 # ============================================================================
 
-def mlp(sizes, activation=nn.ReLU, output_activation=nn.Identity):
-    """Build a multi-layer perceptron."""
+def mlp(sizes, activation=nn.SiLU, output_activation=nn.Identity):
+    """MLP with LayerNorm for mixed-precision stability."""
     layers = []
     for i in range(len(sizes) - 1):
         layers.append(nn.Linear(sizes[i], sizes[i + 1]))
         if i < len(sizes) - 2:
+            layers.append(nn.LayerNorm(sizes[i + 1]))
             layers.append(activation())
         else:
             layers.append(output_activation())
@@ -100,47 +142,32 @@ def mlp(sizes, activation=nn.ReLU, output_activation=nn.Identity):
 
 
 class GaussianActor(nn.Module):
-    """
-    Gaussian policy network for continuous action spaces.
-    Outputs mean and log_std for each action dimension.
-    """
+    """Gaussian policy for continuous actions with tanh squashing."""
     
-    LOG_STD_MIN = -20
-    LOG_STD_MAX = 2
+    LOG_STD_MIN, LOG_STD_MAX = -20, 2
     
-    def __init__(self, obs_dim, action_dim, hidden_sizes=(256, 256)):
+    def __init__(self, obs_dim, action_dim, hidden_sizes=(512, 512, 256)):
         super().__init__()
-        
-        self.net = mlp([obs_dim] + list(hidden_sizes), activation=nn.ReLU)
+        self.net = mlp([obs_dim] + list(hidden_sizes))
         self.mu_layer = nn.Linear(hidden_sizes[-1], action_dim)
         self.log_std_layer = nn.Linear(hidden_sizes[-1], action_dim)
     
+    @torch.compile()
     def forward(self, obs, deterministic=False, with_logprob=True):
         net_out = self.net(obs)
         mu = self.mu_layer(net_out)
-        log_std = self.log_std_layer(net_out)
-        log_std = torch.clamp(log_std, self.LOG_STD_MIN, self.LOG_STD_MAX)
+        log_std = torch.clamp(self.log_std_layer(net_out), self.LOG_STD_MIN, self.LOG_STD_MAX)
         std = torch.exp(log_std)
         
-        # Sample action
         dist = Normal(mu, std)
-        if deterministic:
-            action = mu
-        else:
-            action = dist.rsample()  # Reparameterization trick
+        action = mu if deterministic else dist.rsample()
         
-        # Compute log probability
+        logprob = None
         if with_logprob:
-            # Apply tanh squashing correction
             logprob = dist.log_prob(action).sum(dim=-1, keepdim=True)
             logprob -= (2 * (np.log(2) - action - F.softplus(-2 * action))).sum(dim=-1, keepdim=True)
-        else:
-            logprob = None
         
-        # Squash action to [-1, 1]
-        action = torch.tanh(action)
-        
-        return action, logprob
+        return torch.tanh(action), logprob
     
     def get_action(self, obs, deterministic=False):
         with torch.no_grad():
@@ -149,20 +176,21 @@ class GaussianActor(nn.Module):
 
 
 class Critic(nn.Module):
-    """Q-function critic network."""
+    """Q-function network."""
     
-    def __init__(self, obs_dim, action_dim, hidden_sizes=(256, 256)):
+    def __init__(self, obs_dim, action_dim, hidden_sizes=(512, 512, 256)):
         super().__init__()
         self.q = mlp([obs_dim + action_dim] + list(hidden_sizes) + [1])
     
+    @torch.compile()
     def forward(self, obs, action):
         return self.q(torch.cat([obs, action], dim=-1))
 
 
 class DoubleCritic(nn.Module):
-    """Twin Q-networks for SAC (reduces overestimation bias)."""
+    """Twin Q-networks for reduced overestimation bias."""
     
-    def __init__(self, obs_dim, action_dim, hidden_sizes=(256, 256)):
+    def __init__(self, obs_dim, action_dim, hidden_sizes=(512, 512, 256)):
         super().__init__()
         self.q1 = Critic(obs_dim, action_dim, hidden_sizes)
         self.q2 = Critic(obs_dim, action_dim, hidden_sizes)
@@ -172,30 +200,46 @@ class DoubleCritic(nn.Module):
 
 
 # ============================================================================
-# SAC Agent
+# SAC Agent (GPU-Optimized)
 # ============================================================================
 
 class SACAgent:
-    """Soft Actor-Critic agent with automatic entropy tuning."""
+    """
+    Soft Actor-Critic agent with automatic entropy tuning.
+    
+    GPU Optimizations:
+    - Mixed precision training (BF16 on RTX 5070 Ti)
+    - Fused AdamW optimizer
+    - torch.compile() on networks
+    - Gradient scaling for FP16 stability
+    """
     
     def __init__(
         self,
         obs_dim,
         action_dim,
-        hidden_sizes=(256, 256),
+        hidden_sizes=(512, 512, 256),  # Larger networks for GPU
         lr=3e-4,
         gamma=0.99,
         tau=0.005,
         alpha=0.2,
         auto_alpha=True,
-        device='cpu',
+        device='cuda',
+        use_amp=True,  # Automatic mixed precision
     ):
         self.gamma = gamma
         self.tau = tau
         self.device = device
         self.action_dim = action_dim
+        self.use_amp = use_amp and device != 'cpu'
         
-        # Networks
+        # Determine best dtype for this GPU (BF16 preferred on Ampere+)
+        if self.use_amp:
+            # RTX 5070 Ti (Blackwell) supports BF16 natively
+            self.amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+            print(f"Using mixed precision with {self.amp_dtype}")
+        
+        # Networks (larger for better GPU utilization)
         self.actor = GaussianActor(obs_dim, action_dim, hidden_sizes).to(device)
         self.critic = DoubleCritic(obs_dim, action_dim, hidden_sizes).to(device)
         self.critic_target = DoubleCritic(obs_dim, action_dim, hidden_sizes).to(device)
@@ -203,57 +247,97 @@ class SACAgent:
         # Copy parameters to target
         self.critic_target.load_state_dict(self.critic.state_dict())
         
-        # Optimizers
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=lr)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=lr)
+        # Fused optimizers (fewer kernel launches, better GPU efficiency)
+        self.actor_optimizer = optim.AdamW(
+            self.actor.parameters(), 
+            lr=lr, 
+            fused=True if device != 'cpu' else False,
+            weight_decay=1e-5
+        )
+        self.critic_optimizer = optim.AdamW(
+            self.critic.parameters(), 
+            lr=lr, 
+            fused=True if device != 'cpu' else False,
+            weight_decay=1e-5
+        )
+        
+        # Gradient scaler for mixed precision (only needed for FP16)
+        self.scaler = GradScaler(enabled=(self.use_amp and self.amp_dtype == torch.float16))
         
         # Entropy tuning
         self.auto_alpha = auto_alpha
         if auto_alpha:
-            self.target_entropy = -action_dim  # Heuristic: -dim(A)
+            # Lower target entropy = less exploration, more exploitation
+            # Use -0.5 * dim(A) for faster convergence after initial exploration
+            self.target_entropy = -0.5 * action_dim
             self.log_alpha = torch.zeros(1, requires_grad=True, device=device)
-            self.alpha_optimizer = optim.Adam([self.log_alpha], lr=lr)
+            self.alpha_optimizer = optim.AdamW([self.log_alpha], lr=lr)
             self.alpha = self.log_alpha.exp().item()
         else:
             self.alpha = alpha
     
     def get_action(self, obs, deterministic=False):
-        obs = torch.FloatTensor(obs).unsqueeze(0).to(self.device)
+        # Mark step for CUDA graphs if they are used
+        if hasattr(torch, "compiler") and hasattr(torch.compiler, "cudagraph_mark_step_begin"):
+            torch.compiler.cudagraph_mark_step_begin()
+            
+        obs = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
         return self.actor.get_action(obs, deterministic)
     
-    def update(self, replay_buffer, batch_size=256):
+    def update(self, replay_buffer, batch_size=1024):
+        """Update networks with mixed precision for GPU efficiency."""
+        # Mark step for CUDA graphs stability
+        if hasattr(torch, "compiler") and hasattr(torch.compiler, "cudagraph_mark_step_begin"):
+            torch.compiler.cudagraph_mark_step_begin()
+            
         obs, actions, rewards, next_obs, dones = replay_buffer.sample(batch_size)
         
-        # ---- Critic update ----
-        with torch.no_grad():
-            next_actions, next_logprobs = self.actor(next_obs)
-            q1_target, q2_target = self.critic_target(next_obs, next_actions)
-            q_target = torch.min(q1_target, q2_target) - self.alpha * next_logprobs
-            td_target = rewards + self.gamma * (1 - dones) * q_target
+        # ---- Critic update with AMP ----
+        with torch.amp.autocast(device_type='cuda', dtype=self.amp_dtype, enabled=self.use_amp):
+            with torch.no_grad():
+                next_actions, next_logprobs = self.actor(next_obs)
+                # Clone outputs to prevent CUDA graph overwriting issues when passing to another module
+                next_actions = next_actions.clone()
+                next_logprobs = next_logprobs.clone()
+                
+                q1_target, q2_target = self.critic_target(next_obs, next_actions)
+                q_target = torch.min(q1_target, q2_target) - self.alpha * next_logprobs
+                td_target = rewards + self.gamma * (1 - dones) * q_target
+            
+            q1, q2 = self.critic(obs, actions)
+            critic_loss = F.mse_loss(q1, td_target) + F.mse_loss(q2, td_target)
         
-        q1, q2 = self.critic(obs, actions)
-        critic_loss = F.mse_loss(q1, td_target) + F.mse_loss(q2, td_target)
+        self.critic_optimizer.zero_grad(set_to_none=True)  # Faster than zero_grad()
+        self.scaler.scale(critic_loss).backward()
+        self.scaler.unscale_(self.critic_optimizer)
+        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 1.0)  # Gradient clipping
+        self.scaler.step(self.critic_optimizer)
         
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward()
-        self.critic_optimizer.step()
+        # ---- Actor update with AMP ----
+        with torch.amp.autocast(device_type='cuda', dtype=self.amp_dtype, enabled=self.use_amp):
+            # Mark step again before second model invocation block
+            if hasattr(torch, "compiler") and hasattr(torch.compiler, "cudagraph_mark_step_begin"):
+                torch.compiler.cudagraph_mark_step_begin()
+                
+            new_actions, logprobs = self.actor(obs)
+            q1_new, q2_new = self.critic(obs, new_actions)
+            q_new = torch.min(q1_new, q2_new)
+            actor_loss = (self.alpha * logprobs - q_new).mean()
         
-        # ---- Actor update ----
-        new_actions, logprobs = self.actor(obs)
-        q1_new, q2_new = self.critic(obs, new_actions)
-        q_new = torch.min(q1_new, q2_new)
+        self.actor_optimizer.zero_grad(set_to_none=True)
+        self.scaler.scale(actor_loss).backward()
+        self.scaler.unscale_(self.actor_optimizer)
+        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
+        self.scaler.step(self.actor_optimizer)
         
-        actor_loss = (self.alpha * logprobs - q_new).mean()
-        
-        self.actor_optimizer.zero_grad()
-        actor_loss.backward()
-        self.actor_optimizer.step()
+        # Update scaler
+        self.scaler.update()
         
         # ---- Alpha (entropy temperature) update ----
         if self.auto_alpha:
             alpha_loss = -(self.log_alpha * (logprobs + self.target_entropy).detach()).mean()
             
-            self.alpha_optimizer.zero_grad()
+            self.alpha_optimizer.zero_grad(set_to_none=True)
             alpha_loss.backward()
             self.alpha_optimizer.step()
             
@@ -263,9 +347,10 @@ class SACAgent:
             
             self.alpha = self.log_alpha.exp().item()
         
-        # ---- Soft update target networks ----
-        for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
-            target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+        # ---- Soft update target networks (in-place for efficiency) ----
+        with torch.no_grad():
+            for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
+                target_param.data.lerp_(param.data, self.tau)
         
         return {
             'critic_loss': critic_loss.item(),
@@ -282,11 +367,12 @@ class SACAgent:
             'critic_optimizer': self.critic_optimizer.state_dict(),
             'log_alpha': self.log_alpha if self.auto_alpha else None,
             'alpha_optimizer': self.alpha_optimizer.state_dict() if self.auto_alpha else None,
+            'scaler': self.scaler.state_dict(),
         }, filepath)
         print(f"Model saved to {filepath}")
     
     def load(self, filepath, resume_training=False):
-        checkpoint = torch.load(filepath, map_location=self.device)
+        checkpoint = torch.load(filepath, map_location=self.device, weights_only=False)
         self.actor.load_state_dict(checkpoint['actor'])
         self.critic.load_state_dict(checkpoint['critic'])
         self.critic_target.load_state_dict(checkpoint['critic_target'])
@@ -299,6 +385,8 @@ class SACAgent:
                 self.alpha = self.log_alpha.exp().item()
                 if checkpoint.get('alpha_optimizer') is not None:
                     self.alpha_optimizer.load_state_dict(checkpoint['alpha_optimizer'])
+            if checkpoint.get('scaler') is not None:
+                self.scaler.load_state_dict(checkpoint['scaler'])
             print(f"Resumed training from {filepath}")
         else:
             print(f"Model loaded from {filepath} (eval mode)")
@@ -322,7 +410,7 @@ class RoboSuiteEnv:
             controller_configs=controller_config,
             has_renderer=render,
             has_offscreen_renderer=False,
-            render_camera="agentview",
+            render_camera="frontview",  # Better view of the arm
             ignore_done=False,
             use_camera_obs=False,
             control_freq=20,
@@ -331,6 +419,7 @@ class RoboSuiteEnv:
         )
         
         self.render_enabled = render
+        self._camera_initialized = False
         
         # Determine observation and action dimensions
         self._setup_spaces()
@@ -356,9 +445,7 @@ class RoboSuiteEnv:
         
         # Action dimension: 6 joint velocities + 1 gripper
         self.action_dim = self.env.action_dim
-        
-        print(f"Observation dim: {self.obs_dim}")
-        print(f"Action dim: {self.action_dim}")
+        # Note: Don't print here - SubprocVecEnv prints once for all envs
     
     def _process_obs(self, obs):
         """Convert observation dict to flat numpy array."""
@@ -376,61 +463,190 @@ class RoboSuiteEnv:
         obs, reward, done, info = self.env.step(action)
         
         # Get positions
-        eef_pos = obs.get('robot0_eef_pos', [0, 0, 0])
         cube_pos = obs.get('cube_pos', [0, 0, 0])
         gripper_to_cube = obs.get('gripper_to_cube_pos', [0, 0, 0])
+        gripper_qpos = obs.get('robot0_gripper_qpos', [0, 0])
         
-        # Distance-based shaping (guide arm toward cube)
+        # Distance to cube
         distance = np.linalg.norm(gripper_to_cube)
-        reach_reward = 1.0 - np.tanh(5.0 * distance)  # 0-1 based on proximity
         
-        # Height bonus (encourage lifting)
-        cube_height = cube_pos[2]
-        lift_reward = 0.0
-        if cube_height > 0.82:  # Table height ~0.8
-            lift_reward = 10.0 * (cube_height - 0.82)
+        # Phase 1: Reach toward cube (0-2 reward)
+        reach_reward = 2.0 * (1.0 - np.tanh(3.0 * distance))
         
-        # Grasp bonus
+        # Phase 2: Grasp reward - encourage closing gripper when close
         grasp_reward = 0.0
-        if distance < 0.05:  # Very close to cube
-            grasp_reward = 5.0
+        gripper_closed = np.mean(gripper_qpos) < 0.02  # Gripper is closing
+        if distance < 0.08:  # Close to cube
+            grasp_reward = 3.0
+            if gripper_closed:
+                grasp_reward = 8.0  # Big bonus for grasping
         
-        # Combine rewards
-        shaped_reward = reward + reach_reward + lift_reward + grasp_reward
+        # Phase 3: Lift reward - MUCH stronger incentive
+        cube_height = cube_pos[2]
+        table_height = 0.82
+        lift_reward = 0.0
+        if cube_height > table_height:
+            height_above_table = cube_height - table_height
+            # Exponential reward for lifting - gets very large for high lifts
+            lift_reward = 50.0 * height_above_table + 100.0 * (height_above_table ** 2)
+            
+            # Bonus for sustained lift while gripper closed
+            if gripper_closed and height_above_table > 0.05:
+                lift_reward += 20.0
+        
+        # Success bonus
+        success_reward = 0.0
+        if cube_height > table_height + 0.1:  # Lifted 10cm
+            success_reward = 100.0
+        
+        # Combine rewards (base reward from env + shaped rewards)
+        shaped_reward = reward + reach_reward + grasp_reward + lift_reward + success_reward
         
         return self._process_obs(obs), shaped_reward, done, info
     
     def render(self):
         if self.render_enabled:
             self.env.render()
+            # Adjust camera on first render
+            if not self._camera_initialized:
+                try:
+                    # Try to access the MuJoCo viewer and adjust camera
+                    viewer = self.env.viewer
+                    if hasattr(viewer, 'viewer') and viewer.viewer is not None:
+                        viewer.viewer.cam.distance = 2.5
+                        viewer.viewer.cam.elevation = -25
+                        viewer.viewer.cam.azimuth = 135
+                        self._camera_initialized = True
+                except Exception:
+                    pass  # Camera adjustment not supported, use default view
     
     def close(self):
         self.env.close()
 
 
+def worker(remote, parent_remote, env_fn):
+    """Worker process for SubprocVecEnv."""
+    parent_remote.close()
+    env = env_fn()
+    try:
+        while True:
+            cmd, data = remote.recv()
+            if cmd == 'step':
+                obs, reward, done, info = env.step(data)
+                if done:
+                    obs = env.reset()
+                remote.send((obs, reward, done, info))
+            elif cmd == 'reset':
+                obs = env.reset()
+                remote.send(obs)
+            elif cmd == 'get_spaces':
+                remote.send((env.obs_dim, env.action_dim))
+            elif cmd == 'close':
+                env.close()
+                remote.close()
+                break
+            else:
+                raise NotImplementedError
+    except EOFError:
+        pass
+
+
+class SubprocVecEnv:
+    """Parallel environments using multiprocessing."""
+    
+    def __init__(self, env_fns):
+        self.waiting = False
+        self.closed = False
+        self.num_envs = len(env_fns)
+        self.remotes, self.work_remotes = zip(*[mp.Pipe() for _ in range(self.num_envs)])
+        self.ps = [mp.Process(target=worker, args=(work_remote, remote, env_fn))
+                   for (work_remote, remote, env_fn) in zip(self.work_remotes, self.remotes, env_fns)]
+        for p in self.ps:
+            p.daemon = True
+            p.start()
+        for remote in self.work_remotes:
+            remote.close()
+            
+        self.remotes[0].send(('get_spaces', None))
+        self.obs_dim, self.action_dim = self.remotes[0].recv()
+
+    def step(self, actions):
+        for remote, action in zip(self.remotes, actions):
+            remote.send(('step', action))
+        results = [remote.recv() for remote in self.remotes]
+        obs, rews, dones, infos = zip(*results)
+        return np.stack(obs), np.array(rews), np.array(dones), infos
+
+    def reset(self):
+        for remote in self.remotes:
+            remote.send(('reset', None))
+        obs = [remote.recv() for remote in self.remotes]
+        return np.stack(obs)
+
+    def close(self):
+        if self.closed:
+            return
+        for remote in self.remotes:
+            remote.send(('close', None))
+        for p in self.ps:
+            p.join()
+        self.closed = True
+
+
 # ============================================================================
-# Training Loop
+# Training Loop (GPU-Optimized)
 # ============================================================================
 
 def train(args):
-    """Main training function."""
+    """Main training function with GPU and CPU optimizations."""
     
     # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() and args.cuda else 'cpu')
+    
+    if args.cuda and device.type == 'cpu':
+        print("\n" + "!"*60)
+        print("CRITICAL ERROR: CUDA REQUESTED BUT NO GPU DETECTED!")
+        print("Please check if nvidia-container-toolkit is installed and ")
+        print("verify you ran docker with --gpus all.")
+        print("!"*60 + "\n")
+        sys.exit(1)
+        
     print(f"Using device: {device}")
     
-    # Create environment
-    env = RoboSuiteEnv(render=args.render)
+    # GPU-specific optimizations
+    if device.type == 'cuda':
+        # Enable TF32 for faster matmuls on Ampere+ GPUs (RTX 30xx, 40xx, 50xx)
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cudnn.benchmark = True  # Optimize convolution algorithms
+        
+        # Print GPU info
+        gpu_name = torch.cuda.get_device_name(0)
+        gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+        print(f"GPU: {gpu_name} ({gpu_mem:.1f} GB)")
     
-    # Create agent
+    # CPU Optimization for Ryzen 9 9900X (24 threads)
+    # Set intra-op threads to allow envs to have more CPU slices
+    torch.set_num_threads(max(1, min(8, mp.cpu_count() // args.num_envs)))
+    print(f"CPU Threads per Torch Op: {torch.get_num_threads()}")
+    
+    # Create parallel environments
+    def make_env():
+        return RoboSuiteEnv(render=False)
+    
+    print(f"Launching {args.num_envs} parallel environments on Ryzen 9 9900X...")
+    env = SubprocVecEnv([make_env for _ in range(args.num_envs)])
+    
+    # Create agent with larger networks for GPU
     agent = SACAgent(
         obs_dim=env.obs_dim,
         action_dim=env.action_dim,
-        hidden_sizes=(256, 256),
+        hidden_sizes=(512, 512, 256),  # Larger network for better GPU utilization
         lr=args.lr,
         gamma=args.gamma,
         tau=args.tau,
         device=device,
+        use_amp=args.cuda,  # Enable mixed precision on GPU
     )
     
     # Resume from checkpoint if specified
@@ -438,19 +654,17 @@ def train(args):
     if args.resume:
         if os.path.exists(args.resume):
             agent.load(args.resume, resume_training=True)
-            # Try to extract episode number from filename
             basename = os.path.basename(args.resume)
             if 'ep' in basename:
                 try:
                     start_episode = int(basename.split('ep')[1].split('.')[0]) + 1
-                    print(f"Resuming from episode {start_episode}")
                 except:
                     pass
         else:
-            print(f"Warning: Resume checkpoint {args.resume} not found, starting fresh")
+            print(f"[!] Checkpoint {args.resume} not found, starting fresh")
     
-    # Create replay buffer
-    replay_buffer = ReplayBuffer(
+    # Create GPU-resident replay buffer
+    replay_buffer = GPUReplayBuffer(
         capacity=args.buffer_size,
         obs_dim=env.obs_dim,
         action_dim=env.action_dim,
@@ -458,117 +672,140 @@ def train(args):
     )
     
     # Training metrics
-    episode_rewards = deque(maxlen=100)
+    episode_rewards = np.zeros(args.num_envs)
+    episode_steps = np.zeros(args.num_envs)
+    all_episode_rewards = deque(maxlen=100)
     best_avg_reward = -float('inf')
     
-    # Create save directory (use existing if resuming, else new)
+    # Create save directory
     if args.resume and os.path.dirname(args.resume):
         save_dir = os.path.dirname(args.resume)
     else:
         save_dir = os.path.join(ROOT, "checkpoints", datetime.now().strftime("%Y%m%d_%H%M%S"))
     os.makedirs(save_dir, exist_ok=True)
     
-    print("\n" + "="*60)
-    print("Starting SAC Training for Rover2026 Lift Task")
-    print("="*60)
-    print(f"Episodes: {start_episode} -> {args.episodes}")
-    print(f"Buffer size: {args.buffer_size}")
-    print(f"Batch size: {args.batch_size}")
-    print(f"Learning rate: {args.lr}")
-    print(f"Save directory: {save_dir}")
-    if args.resume:
-        print(f"Resumed from: {args.resume}")
-    print("="*60 + "\n")
+    # Print training configuration
+    print("\n" + "="*70)
+    print("  SAC TRAINING - Rover2026 Lift Task")
+    print("="*70)
+    print(f"  Hardware:")
+    print(f"    GPU: {torch.cuda.get_device_name(0)} (BF16 AMP enabled)")
+    print(f"    CPU: {mp.cpu_count()} threads, {args.num_envs} parallel envs")
+    print(f"  Training:")
+    print(f"    Episodes: {args.episodes} | Batch: {args.batch_size} | Updates/step: {args.updates_per_step}")
+    print(f"    Buffer: {args.buffer_size:,} | Warmup: {args.warmup_steps:,} steps")
+    print(f"  Save: {save_dir}")
+    print("="*70)
+    print("\n  [Warmup] Collecting random samples..." if not args.resume else f"\n  [Resume] Starting from episode {start_episode}")
     
-    # Adjust total_steps if resuming (approximate)
-    total_steps = (start_episode - 1) * 200  # Approximate based on horizon
+    # Timing and metrics
+    total_steps = (start_episode - 1) * 200
+    update_times = deque(maxlen=100)
+    train_start = time.time()
     
+    obs = env.reset()
     for episode in range(start_episode, args.episodes + 1):
-        obs = env.reset()
-        episode_reward = 0
-        episode_steps = 0
-        done = False
-        
-        while not done:
-            # Select action (skip warmup if resuming with trained model)
+        while True:
+            # Select actions
             if total_steps < args.warmup_steps and not args.resume:
-                # Random action during warmup
-                action = np.random.uniform(-1, 1, env.action_dim)
+                actions = np.random.uniform(-1, 1, (args.num_envs, env.action_dim))
             else:
-                action = agent.get_action(obs, deterministic=False)
+                with torch.no_grad():
+                    if hasattr(torch, "compiler") and hasattr(torch.compiler, "cudagraph_mark_step_begin"):
+                        torch.compiler.cudagraph_mark_step_begin()
+                    obs_t = torch.as_tensor(obs, dtype=torch.float32, device=device)
+                    actions_t, _ = agent.actor(obs_t, deterministic=False)
+                    actions = actions_t.cpu().numpy()
+                    actions = actions_t.cpu().numpy()
             
-            # Step environment
-            next_obs, reward, done, info = env.step(action)
+            # Step all environments
+            next_obs, rewards, dones, infos = env.step(actions)
             
-            # Store transition
-            replay_buffer.add(obs, action, reward, next_obs, float(done))
+            # Store transitions
+            for i in range(args.num_envs):
+                replay_buffer.add(obs[i], actions[i], rewards[i], next_obs[i], float(dones[i]))
+                episode_rewards[i] += rewards[i]
+                episode_steps[i] += 1
+                
+                if dones[i]:
+                    all_episode_rewards.append(episode_rewards[i])
+                    episode_rewards[i] = 0
+                    episode_steps[i] = 0
             
             obs = next_obs
-            episode_reward += reward
-            episode_steps += 1
-            total_steps += 1
+            total_steps += args.num_envs
             
-            # Render if enabled
-            if args.render:
-                env.render()
-            
-            # Update agent (start immediately if resuming)
+            # Update agent (GPU-intensive SAC updates)
             should_update = (total_steps >= args.warmup_steps) or (args.resume and replay_buffer.size >= args.batch_size)
-            if should_update and replay_buffer.size >= args.batch_size and total_steps % args.update_freq == 0:
+            if should_update and replay_buffer.size >= args.batch_size:
+                update_start = time.perf_counter()
                 for _ in range(args.updates_per_step):
                     metrics = agent.update(replay_buffer, args.batch_size)
+                torch.cuda.synchronize()
+                update_times.append(time.perf_counter() - update_start)
+                
+            if any(dones):
+                break
         
-        episode_rewards.append(episode_reward)
-        avg_reward = np.mean(episode_rewards)
+        avg_reward = np.mean(all_episode_rewards) if all_episode_rewards else 0
         
-        # Logging
+        # Logging (only at log_freq intervals)
         if episode % args.log_freq == 0:
-            print(f"Episode {episode:5d} | "
-                  f"Steps: {episode_steps:3d} | "
-                  f"Reward: {episode_reward:8.2f} | "
-                  f"Avg(100): {avg_reward:8.2f} | "
-                  f"Alpha: {agent.alpha:.4f}")
+            avg_update_time = np.mean(update_times) * 1000 if update_times else 0
+            elapsed = time.time() - train_start
+            sps = total_steps / elapsed if elapsed > 0 else 0
+            
+            print(f"  Ep {episode:5d} | Steps {total_steps:8,} | "
+                  f"Reward {avg_reward:7.1f} | Alpha {agent.alpha:.3f} | "
+                  f"Update {avg_update_time:5.1f}ms | SPS {sps:5.0f}")
+            
+            # Save best model (only check when logging to avoid spam)
+            if avg_reward > best_avg_reward and episode > start_episode + 50:
+                best_avg_reward = avg_reward
+                agent.save(os.path.join(save_dir, "best_model.pt"))
         
-        # Save best model
-        if avg_reward > best_avg_reward and episode > start_episode + 50:
-            best_avg_reward = avg_reward
-            agent.save(os.path.join(save_dir, "best_model.pt"))
-        
-        # Periodic save
+        # Periodic checkpoint
         if episode % args.save_freq == 0:
-            agent.save(os.path.join(save_dir, f"model_ep{episode}.pt"))
+            agent.save(os.path.join(save_dir, f"checkpoint_ep{episode}.pt"))
     
-    # Final save
+    # Training complete
     agent.save(os.path.join(save_dir, "final_model.pt"))
     env.close()
     
-    print("\n" + "="*60)
-    print("Training Complete!")
-    print(f"Best average reward: {best_avg_reward:.2f}")
-    print(f"Models saved to: {save_dir}")
-    print("="*60)
+    elapsed = time.time() - train_start
+    peak_mem = torch.cuda.max_memory_allocated() / 1e9
+    
+    print("\n" + "="*70)
+    print("  TRAINING COMPLETE")
+    print("="*70)
+    print(f"  Time: {elapsed/60:.1f} min | Steps: {total_steps:,} | Best Reward: {best_avg_reward:.1f}")
+    print(f"  Peak GPU Memory: {peak_mem:.2f} GB")
+    print(f"  Models saved to: {save_dir}")
+    print("="*70 + "\n")
 
 
 def evaluate(args):
-    """Evaluate a trained model."""
-    
+    """Evaluate a trained model with visualization."""
     device = torch.device('cuda' if torch.cuda.is_available() and args.cuda else 'cpu')
-    
-    # Create environment with rendering
     env = RoboSuiteEnv(render=True)
     
-    # Create and load agent
     agent = SACAgent(
         obs_dim=env.obs_dim,
         action_dim=env.action_dim,
+        hidden_sizes=(512, 512, 256),
         device=device,
+        use_amp=False,
     )
     agent.load(args.eval)
     
-    print("\n" + "="*60)
-    print("Evaluating trained agent")
-    print("="*60 + "\n")
+    print("\n" + "="*70)
+    print("  EVALUATION MODE")
+    print("="*70)
+    print(f"  Model: {args.eval}")
+    print(f"  Episodes: {args.eval_episodes}")
+    print("="*70 + "\n")
     
+    rewards = []
     for episode in range(args.eval_episodes):
         obs = env.reset()
         episode_reward = 0
@@ -579,44 +816,53 @@ def evaluate(args):
             obs, reward, done, info = env.step(action)
             episode_reward += reward
             env.render()
-            time.sleep(0.02)  # Slow down for visualization
+            time.sleep(0.02)
         
-        print(f"Episode {episode + 1}: Reward = {episode_reward:.2f}")
+        rewards.append(episode_reward)
+        print(f"  Episode {episode + 1:3d}: {episode_reward:7.1f}")
     
     env.close()
+    print(f"\n  Mean Reward: {np.mean(rewards):.1f} ± {np.std(rewards):.1f}")
 
 
 # ============================================================================
-# Main
+# Main Entry Point
 # ============================================================================
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="SAC Training for Rover2026 Lift Task")
+    parser = argparse.ArgumentParser(
+        description="SAC Training for Rover2026 Lift Task",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
     
-    # Mode
-    parser.add_argument('--train', action='store_true', help='Train a new agent')
-    parser.add_argument('--eval', type=str, default=None, help='Path to model for evaluation')
-    parser.add_argument('--resume', type=str, default=None, help='Path to checkpoint to resume training from')
+    # Mode selection
+    mode = parser.add_argument_group("Mode")
+    mode.add_argument('--train', action='store_true', help='Train a new agent')
+    mode.add_argument('--eval', type=str, default=None, metavar='PATH', help='Evaluate model at PATH')
+    mode.add_argument('--resume', type=str, default=None, metavar='PATH', help='Resume training from checkpoint')
     
-    # Training hyperparameters
-    parser.add_argument('--episodes', type=int, default=1000, help='Number of training episodes')
-    parser.add_argument('--buffer_size', type=int, default=1000000, help='Replay buffer size')
-    parser.add_argument('--batch_size', type=int, default=512, help='Batch size for updates (larger = better GPU utilization)')
-    parser.add_argument('--lr', type=float, default=3e-4, help='Learning rate')
-    parser.add_argument('--gamma', type=float, default=0.99, help='Discount factor')
-    parser.add_argument('--tau', type=float, default=0.005, help='Soft update coefficient')
-    parser.add_argument('--warmup_steps', type=int, default=5000, help='Random actions before training')
-    parser.add_argument('--update_freq', type=int, default=1, help='Steps between updates')
-    parser.add_argument('--updates_per_step', type=int, default=4, help='Gradient updates per step (higher = more GPU work)')
+    # Training hyperparameters  
+    train_args = parser.add_argument_group("Training")
+    train_args.add_argument('--episodes', type=int, default=1000, help='Training episodes')
+    train_args.add_argument('--buffer_size', type=int, default=1_000_000, help='Replay buffer size')
+    train_args.add_argument('--batch_size', type=int, default=1024, help='Batch size (larger = better GPU util)')
+    train_args.add_argument('--lr', type=float, default=3e-4, help='Learning rate')
+    train_args.add_argument('--gamma', type=float, default=0.99, help='Discount factor')
+    train_args.add_argument('--tau', type=float, default=0.005, help='Soft update coefficient')
+    train_args.add_argument('--warmup_steps', type=int, default=5000, help='Random exploration steps')
+    train_args.add_argument('--updates_per_step', type=int, default=8, help='Gradient updates per env step')
     
-    # Logging and saving
-    parser.add_argument('--log_freq', type=int, default=10, help='Episodes between logging')
-    parser.add_argument('--save_freq', type=int, default=100, help='Episodes between saves')
-    parser.add_argument('--eval_episodes', type=int, default=10, help='Episodes for evaluation')
+    # Logging/Saving
+    log_args = parser.add_argument_group("Logging")
+    log_args.add_argument('--log_freq', type=int, default=10, help='Episodes between logs')
+    log_args.add_argument('--save_freq', type=int, default=100, help='Episodes between checkpoints')
+    log_args.add_argument('--eval_episodes', type=int, default=10, help='Evaluation episodes')
     
-    # Environment
-    parser.add_argument('--render', action='store_true', help='Render during training')
-    parser.add_argument('--cuda', action='store_true', help='Use CUDA if available')
+    # Hardware
+    hw_args = parser.add_argument_group("Hardware")
+    hw_args.add_argument('--cuda', action='store_true', help='Use CUDA GPU acceleration')
+    hw_args.add_argument('--num_envs', type=int, default=16, help='Parallel environments (8-16 for Ryzen 9)')
+    hw_args.add_argument('--render', action='store_true', help='Render during training')
     
     args = parser.parse_args()
     
@@ -625,6 +871,7 @@ if __name__ == "__main__":
     elif args.train:
         train(args)
     else:
-        print("Please specify --train or --eval <model_path>")
-        print("Example: python train_lift.py --train")
-        print("Example: python train_lift.py --eval checkpoints/best_model.pt")
+        parser.print_help()
+        print("\nExamples:")
+        print("  python train_lift.py --train --cuda")
+        print("  python train_lift.py --eval checkpoints/best_model.pt --cuda")
