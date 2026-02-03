@@ -4,3 +4,18 @@ ERROR: could not create window
 Sun Jan 25 14:21:33 2026
 ERROR: could not create window
 
+Tue Feb  3 08:06:13 2026
+ERROR: could not initialize GLFW
+
+Tue Feb  3 08:10:57 2026
+ERROR: could not initialize GLFW
+
+Tue Feb  3 08:14:48 2026
+ERROR: could not initialize GLFW
+
+Tue Feb  3 16:22:17 2026
+ERROR: could not initialize GLFW
+
+Tue Feb  3 16:24:13 2026
+ERROR: could not initialize GLFW
+

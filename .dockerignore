@@ -1,0 +1,70 @@
+# Docker build context exclusions for LearnFlake
+# Prevents copying build artifacts, logs, and problematic symlinks
+
+# Colcon build artifacts (contain symlinks that break on Windows)
+build/
+install/
+log/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitmodules
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Docker files (no need to copy into context)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Documentation (optional, saves space)
+*.md
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+random_install_files/
+
+# Large binary files
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+
+# Model checkpoints (can be large)
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.pkl
+
+# Jupyter
+.ipynb_checkpoints/

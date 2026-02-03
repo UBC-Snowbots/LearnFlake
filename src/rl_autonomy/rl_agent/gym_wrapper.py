@@ -18,6 +18,7 @@ class RobosuiteGymWrapper(gym.Env):
         env_name (str): Robosuite environment name (e.g., "Lift", "Door", "Stack")
         robots (str or list): Robot(s) to use (e.g., "Panda", "Jaco", "Sawyer")
         has_renderer (bool): Enable on-screen rendering
+        has_offscreen_renderer (bool): Enable offscreen rendering (None=auto, False=faster training)
         use_camera_obs (bool): Include camera observations
         reward_shaping (bool): Enable dense reward shaping
         control_freq (int): Control frequency in Hz
@@ -36,6 +37,7 @@ class RobosuiteGymWrapper(gym.Env):
         env_name="Lift",
         robots="Panda",
         has_renderer=False,
+        has_offscreen_renderer=None,  # None = auto, True/False = override
         use_camera_obs=False,
         reward_shaping=True,
         control_freq=20,
@@ -43,12 +45,16 @@ class RobosuiteGymWrapper(gym.Env):
     ):
         super().__init__()
 
+        # Auto-set offscreen renderer if not specified
+        if has_offscreen_renderer is None:
+            has_offscreen_renderer = not has_renderer
+
         self.env = GymWrapper(
             make(
                 env_name=env_name,
                 robots=robots,
                 has_renderer=has_renderer,
-                has_offscreen_renderer=not has_renderer,
+                has_offscreen_renderer=has_offscreen_renderer,
                 use_camera_obs=use_camera_obs,
                 reward_shaping=reward_shaping,
                 control_freq=control_freq,
