@@ -34,8 +34,13 @@ elapsed = time.time() - start_time
 print(f"Training took {elapsed:.2f} seconds")
 
 # Evaluate
+start_time2 = time.time()
 mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=10)
 print(f"Mean reward: {mean_reward}, Std reward: {std_reward}")
+elapsed2 = time.time() - start_time2
+print(f"Evaluation took {elapsed2:.2f} seconds")
+
+
 
 # Save the model
 model.save("ppo_lift_model")
