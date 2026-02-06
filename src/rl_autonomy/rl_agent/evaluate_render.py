@@ -42,7 +42,7 @@ from stable_baselines3.common.evaluation import evaluate_policy
 # =============================================================================
 # CONFIGURATION - Modify these as needed
 # =============================================================================
-MODEL_PATH = "sac_Rover2026_V1_model.zip"
+MODEL_PATH = "best_model/best_model.zip"
 N_EPISODES = 5
 ROBOT = "Rover2026"
 
@@ -63,7 +63,13 @@ env = RobosuiteGymWrapper(
 # LOAD MODEL
 # =============================================================================
 print(f"Loading model from: {MODEL_PATH}")
-model = SAC.load(MODEL_PATH, env=env, device="cpu")
+
+if not os.path.exists(MODEL_PATH):
+    print(f"Model not found at {MODEL_PATH}. Train first!")
+    env.close()
+    exit(0)
+
+model = SAC.load(MODEL_PATH, env=env, device="cuda")
 print(f"Model trained for {model.num_timesteps} timesteps")
 
 # =============================================================================

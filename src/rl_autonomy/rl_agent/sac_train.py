@@ -6,16 +6,15 @@ import time
 from gym_wrapper import RobosuiteGymWrapper
 from stable_baselines3 import SAC
 from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
+from stable_baselines3.common.callbacks import CheckpointCallback
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-MODEL_PATH = "sac_Rover2026_V1_model.zip"
+MODEL_PATH = "sac_Rover2026_V1_model"
 SAVE_NAME = "sac_Rover2026_V1_model"
-TOTAL_TIMESTEPS = 1_000_000
-CHECKPOINT_FREQ = TOTAL_TIMESTEPS/10
-EVAL_FREQ = 1
+TOTAL_TIMESTEPS = 1_000
+CHECKPOINT_FREQ = 100  # Saves 10 checkpoints throughout training
 N_EVAL_EPISODES = 10
 DEVICE = "cuda"
 ROBOT = "Rover2026"
@@ -51,20 +50,10 @@ else:
 # =============================================================================
 # CALLBACKS
 # =============================================================================
-# Save checkpoint every N steps
 checkpoint_callback = CheckpointCallback(
     save_freq=CHECKPOINT_FREQ,
     save_path="./checkpoints/",
     name_prefix="sac_rover"
-)
-
-# Evaluate and save best model
-eval_callback = EvalCallback(
-    env,
-    best_model_save_path="./best_model/",
-    eval_freq=EVAL_FREQ,
-    n_eval_episodes=N_EVAL_EPISODES,
-    deterministic=True
 )
 
 # =============================================================================
@@ -74,7 +63,7 @@ start_time = time.time()
 model.learn(
     total_timesteps=TOTAL_TIMESTEPS,
     reset_num_timesteps=False,
-    callback=[checkpoint_callback, eval_callback]
+    callback=checkpoint_callback
 )
 elapsed = time.time() - start_time
 print(f"Training took {elapsed:.2f} seconds")
