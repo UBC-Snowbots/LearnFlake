@@ -2,7 +2,7 @@
 Evaluation Script with Rendering Window
 ========================================
 
-Visualize a trained PPO agent performing the Lift task in Robosuite.
+Visualize a trained SAC agent performing the Lift task in Robosuite.
 
 PREREQUISITES (Docker on Windows):
 ----------------------------------
@@ -23,12 +23,6 @@ USAGE:
     cd /LearnFlake/src/rl_autonomy/rl_agent
     python evaluate_render.py
 
-CONFIGURATION:
---------------
-- MODEL_PATH: Path to your trained .zip model file
-- N_EPISODES: Number of evaluation episodes to run
-- RENDER_DELAY: Seconds between frames (lower = faster playback)
-
 TROUBLESHOOTING:
 ----------------
 - "Failed to open display": VcXsrv not running or DISPLAY not set
@@ -42,14 +36,15 @@ os.environ["MUJOCO_GL"] = "glx"
 
 import time
 from gym_wrapper import RobosuiteGymWrapper
-from stable_baselines3 import PPO
+from stable_baselines3 import SAC
+from stable_baselines3.common.evaluation import evaluate_policy
 
 # =============================================================================
 # CONFIGURATION - Modify these as needed
 # =============================================================================
-MODEL_PATH = "sac_lift_model.zip"
+MODEL_PATH = "sac_Rover2026_V1_model.zip"
 N_EPISODES = 5
-RENDER_DELAY = 0.02  # seconds between frames
+ROBOT = "Rover2026"
 
 # =============================================================================
 # ENVIRONMENT SETUP
@@ -57,8 +52,8 @@ RENDER_DELAY = 0.02  # seconds between frames
 print("Creating environment with renderer enabled...")
 env = RobosuiteGymWrapper(
     "Lift",
-    robots="Rover2025",
-    has_renderer=True,  # Enable on-screen window
+    robots=ROBOT,
+    has_renderer=True,
     has_offscreen_renderer=False,
     use_camera_obs=False,
     reward_shaping=True
@@ -68,33 +63,28 @@ env = RobosuiteGymWrapper(
 # LOAD MODEL
 # =============================================================================
 print(f"Loading model from: {MODEL_PATH}")
-model = PPO.load(MODEL_PATH, env=env, device="cpu")
+model = SAC.load(MODEL_PATH, env=env, device="cpu")
 print(f"Model trained for {model.num_timesteps} timesteps")
 
 # =============================================================================
-# RUN EVALUATION
+# RUN EVALUATION WITH RENDERING
 # =============================================================================
-print(f"\nRunning {N_EPISODES} evaluation episodes...")
+print(f"\nRunning {N_EPISODES} evaluation episodes with rendering...")
 print("=" * 50)
 
-for ep in range(N_EPISODES):
-    obs, info = env.reset()
-    total_reward = 0
-    done = False
-    step = 0
-
-    while not done:
-        action, _ = model.predict(obs, deterministic=True)
-        obs, reward, terminated, truncated, info = env.step(action)
-        total_reward += reward
-        done = terminated or truncated
-        step += 1
-
-        env.render()
-        time.sleep(RENDER_DELAY)
-
-    print(f"Episode {ep+1}/{N_EPISODES}: reward={total_reward:.2f}, steps={step}")
+start_time = time.time()
+mean_reward, std_reward = evaluate_policy(
+    model,
+    env,
+    n_eval_episodes=N_EPISODES,
+    render=True,
+    deterministic=True
+)
+elapsed = time.time() - start_time
 
 print("=" * 50)
+print(f"Mean reward: {mean_reward:.2f}, Std reward: {std_reward:.2f}")
+print(f"Evaluation took {elapsed:.2f} seconds")
+
 env.close()
 print("Evaluation complete!")
