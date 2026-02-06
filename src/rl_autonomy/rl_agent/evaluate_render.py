@@ -47,7 +47,7 @@ from stable_baselines3 import PPO
 # =============================================================================
 # CONFIGURATION - Modify these as needed
 # =============================================================================
-MODEL_PATH = "/LearnFlake/src/rl_autonomy/rl_agent/ppo_lift_model.zip"
+MODEL_PATH = "sac_lift_model.zip"
 N_EPISODES = 5
 RENDER_DELAY = 0.02  # seconds between frames
 
@@ -57,7 +57,7 @@ RENDER_DELAY = 0.02  # seconds between frames
 print("Creating environment with renderer enabled...")
 env = RobosuiteGymWrapper(
     "Lift",
-    robots="Panda",
+    robots="Rover2025",
     has_renderer=True,  # Enable on-screen window
     has_offscreen_renderer=False,
     use_camera_obs=False,
