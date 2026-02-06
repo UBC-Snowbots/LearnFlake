@@ -74,3 +74,5 @@ rl/
 src/rl_autonomy/env.py
 
 .venv
+src/MUJOCO_LOG.TXT
+git_log_capture.txt
