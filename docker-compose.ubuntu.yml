@@ -92,6 +92,8 @@ services:
       service: rover_cpu
     container_name: learnflake_gpu
     image: learnflake:ubuntu22.04-gpu
+    ports:
+      - "8888:8888"
     deploy:
       resources:
         reservations:
@@ -102,17 +104,17 @@ services:
     environment:
       - ROVERFLAKE_ROOT=/LearnFlake
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-      # Use EGL with NVIDIA
       - MUJOCO_GL=egl
       - __GLX_VENDOR_LIBRARY_NAME=nvidia
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
-      # Display
       - DISPLAY=${DISPLAY:-:0}
       - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
       - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
       - PULSE_SERVER=/mnt/wslg/PulseServer
       - QT_X11_NO_MITSHM=1
+
+
 
   # ============================================================================
   # Development service (with additional dev tools)
