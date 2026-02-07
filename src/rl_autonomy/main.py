@@ -13,7 +13,7 @@ if __package__ is None:
     # Add src to path
     ROOT = os.path.dirname(os.path.abspath(__file__))
     SRC_PATH = os.path.abspath(os.path.join(ROOT, ".."))
-    if SRC_PATH not in sys.path:
+    if SRC_PATH not in sys.path: 
         sys.path.insert(0, SRC_PATH)
     from rl_autonomy.config import Config
     from rl_autonomy.trainer import train_v3, evaluate_v3
@@ -30,18 +30,13 @@ def main():
     # Mode (CLI overrides Config.MODE)
     mode = parser.add_argument_group("Mode")
     mode.add_argument('--train', action='store_true', help='Train (or set Config.MODE="train")')
-    # Default is None so we can distinguish CLI usage from Config
-    mode.add_argument('--eval', type=str, default=None, 
-                     help='Evaluate model (defaults to Config.EVAL_CHECKPOINT if not set)')
-    mode.add_argument('--resume', type=str, default=None, 
-                     help='Resume training (defaults to Config.RESUME_CHECKPOINT if not set)')
+    mode.add_argument('--eval', type=str, default=None, help='Evaluate model (defaults to Config.EVAL_CHECKPOINT if not set)')
+    mode.add_argument('--resume', type=str, default=None, help='Resume training (defaults to Config.RESUME_CHECKPOINT if not set)')
     
     # Environment
     env_args = parser.add_argument_group("Environment")
-    env_args.add_argument('--domain_rand', action='store_true', default=Config.DOMAIN_RANDOMIZATION, 
-                         help='Domain randomization')
-    env_args.add_argument('--difficulty', type=int, default=Config.EVAL_DIFFICULTY, choices=[0, 1, 2], 
-                         help='Evaluation difficulty (0=easy, 1=medium, 2=hard)')
+    env_args.add_argument('--domain_rand', action='store_true', default=Config.DOMAIN_RANDOMIZATION, help='Domain randomization')
+    env_args.add_argument('--difficulty', type=int, default=Config.EVAL_DIFFICULTY, choices=[0, 1, 2], help='Evaluation difficulty (0=easy, 1=medium, 2=hard)')
     
     # Training (defaults from Config class)
     train_args = parser.add_argument_group("Training")
@@ -49,27 +44,19 @@ def main():
     train_args.add_argument('--num_envs', type=int, default=Config.NUM_ENVS, help='Parallel environments')
     train_args.add_argument('--batch_size', type=int, default=Config.BATCH_SIZE, help='Batch size')
     train_args.add_argument('--buffer_size', type=int, default=Config.BUFFER_SIZE, help='Replay buffer size')
-    train_args.add_argument('--updates_per_step', type=int, default=Config.UPDATES_PER_STEP, 
-                           help='Gradient updates per step')
+    train_args.add_argument('--updates_per_step', type=int, default=Config.UPDATES_PER_STEP, help='Gradient updates per step')
     train_args.add_argument('--cuda', action='store_true', default=Config.USE_CUDA, help='Use CUDA')
     train_args.add_argument('--no_cuda', dest='cuda', action='store_false', help='Disable CUDA')
     
     # Transfer Learning (defaults from Config class)
     transfer_args = parser.add_argument_group("Transfer Learning")
-    transfer_args.add_argument('--pretrained', type=str, default=Config.PRETRAINED_PATH,
-                               help='Path to V2 checkpoint to load pre-trained skills from')
-    transfer_args.add_argument('--freeze_old_skills', action='store_true', default=Config.FREEZE_OLD_SKILLS,
-                               help='Freeze old skills (Reach/Grasp/Lift/Hold) initially')
-    transfer_args.add_argument('--no_freeze', dest='freeze_old_skills', action='store_false',
-                               help='Do not freeze old skills')
-    transfer_args.add_argument('--differential_lr', action='store_true', default=Config.DIFFERENTIAL_LR,
-                               help='Use different learning rates for old vs new skills')
-    transfer_args.add_argument('--old_skill_lr', type=float, default=Config.OLD_SKILL_LR,
-                               help='Learning rate for old skills (preservation)')
-    transfer_args.add_argument('--new_skill_lr', type=float, default=Config.NEW_SKILL_LR,
-                               help='Learning rate for new skills (acquisition)')
-    transfer_args.add_argument('--unfreeze_episode', type=int, default=Config.UNFREEZE_EPISODE,
-                               help='Episode at which to unfreeze old skills for fine-tuning')
+    transfer_args.add_argument('--pretrained', type=str, default=Config.PRETRAINED_PATH, help='Path to V2 checkpoint to load pre-trained skills from')
+    transfer_args.add_argument('--freeze_old_skills', action='store_true', default=Config.FREEZE_OLD_SKILLS, help='Freeze old skills (Reach/Grasp/Lift/Hold) initially')
+    transfer_args.add_argument('--no_freeze', dest='freeze_old_skills', action='store_false', help='Do not freeze old skills')
+    transfer_args.add_argument('--differential_lr', action='store_true', default=Config.DIFFERENTIAL_LR, help='Use different learning rates for old vs new skills')
+    transfer_args.add_argument('--old_skill_lr', type=float, default=Config.OLD_SKILL_LR, help='Learning rate for old skills (preservation)')
+    transfer_args.add_argument('--new_skill_lr', type=float, default=Config.NEW_SKILL_LR, help='Learning rate for new skills (acquisition)')
+    transfer_args.add_argument('--unfreeze_episode', type=int, default=Config.UNFREEZE_EPISODE, help='Episode at which to unfreeze old skills for fine-tuning')
     
     # Evaluation
     eval_args = parser.add_argument_group("Evaluation")
