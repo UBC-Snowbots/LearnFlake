@@ -7,7 +7,7 @@ class Config:
     # === Mode ===
     MODE = "train"  # "train", "eval", or "resume"
     EVAL_CHECKPOINT = None  # Path to checkpoint for eval (e.g., "checkpoints_v3/20260206/best_model.pt")
-    RESUME_CHECKPOINT = "checkpoints/20260207_200655/best_model.pt"  # Path to checkpoint to resume training from
+    RESUME_CHECKPOINT = None  # Path to checkpoint to resume training from
     
     # === Hardware ===
     USE_CUDA = True  # Use GPU acceleration
