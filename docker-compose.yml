@@ -47,7 +47,7 @@ services:
     environment:
       - DISPLAY=${DISPLAY}
       - ROVERFLAKE_ROOT=/LearnFlake
-      - MUJOCO_GL=egl # or glfw (headless GUI)
+      - MUJOCO_GL=${MUJOCO_GL:-glfw} # default glfw; override with egl / osmesa / glx
       - __GLX_VENDOR_LIBRARY_NAME=nvidia
     network_mode: host
 
@@ -63,7 +63,7 @@ services:
     environment:
       - DISPLAY=${DISPLAY}
       - ROVERFLAKE_ROOT=/LearnFlake
-      - MUJOCO_GL=egl # egl or glfw (for CPU rendering)
+      - MUJOCO_GL=${MUJOCO_GL:-glfw} # default glfw; override with egl / osmesa / glx
     volumes:
       - ./:/LearnFlake
       - /tmp/.X11-unix:/tmp/.X11-unix
@@ -83,7 +83,7 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
       - __GLX_VENDOR_LIBRARY_NAME=nvidia
-      - MUJOCO_GL=egl # or egl/glfw
+      - MUJOCO_GL=${MUJOCO_GL:-glfw} # default glfw; override with egl / osmesa / glx
     volumes:
       - ./:/LearnFlake
       - /tmp/.X11-unix:/tmp/.X11-unix

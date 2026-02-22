@@ -9,7 +9,7 @@ class RoboSuiteConfig:
     env_name: str = "Lift"
     robots: Any = "Panda"
     controller: Any = "OSC_POSE"
-    has_renderer: bool = False
+    has_renderer: bool = True
     use_camera_obs: bool = False
     horizon: int = 200
     control_freq: int = 20

@@ -58,8 +58,8 @@ RUN bash -x setup_scripts/setup_everything_common.sh
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Mujoco glfw/egl (change the mode in docker-compose.yml)
-ENV MUJOCO_GL=egl
+# Mujoco rendering default (can be overridden at runtime via MUJOCO_GL)
+ENV MUJOCO_GL=glfw
 
 # Nvidia GPU support (this thing is so hard to integrate)
 ENV __GLX_VENDOR_LIBRARY_NAME=nvidia

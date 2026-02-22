@@ -71,3 +71,10 @@ rl/
 
 # Ignore virtual environments
 src/rl_autonomy/rl/
+
+# Agent / local assistant files
+AGENTS.MD
+AGENTS.md
+**/.claude/
+
+robo_imitate-main.zip

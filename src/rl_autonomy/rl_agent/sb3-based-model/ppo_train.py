@@ -1,6 +1,11 @@
 # Must be set BEFORE any mujoco/robosuite imports
 import os
-os.environ["MUJOCO_GL"] = "egl"  # Headless GPU rendering
+
+# Rendering backend toggle:
+# - Default: glfw (onscreen via X11/VcXsrv)
+# - Headless: set MUJOCO_GL_BACKEND = "egl" (or export MUJOCO_GL=egl)
+MUJOCO_GL_BACKEND = os.environ.get("MUJOCO_GL", "glfw")
+os.environ["MUJOCO_GL"] = MUJOCO_GL_BACKEND
 
 import time
 

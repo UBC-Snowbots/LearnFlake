@@ -31,20 +31,26 @@ TROUBLESHOOTING:
 """
 
 import os
-# Override to use GLX for window rendering (not EGL which is headless)
-os.environ["MUJOCO_GL"] = "glx"
-
+# Default to GLFW for window rendering unless user explicitly sets MUJOCO_GL.
+os.environ.setdefault("MUJOCO_GL", "glfw")
+print(f"DISPLAY: {os.environ.get('DISPLAY', 'NOT SET')}")
+import torch
+if torch.cuda.is_available():
+    print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+    print(f"GPU Memory Allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
 import time
 from gym_wrapper import RobosuiteGymWrapper
 from stable_baselines3 import SAC
 from stable_baselines3.common.evaluation import evaluate_policy
 
+
 # =============================================================================
 # CONFIGURATION - Modify these as needed
 # =============================================================================
-MODEL_PATH = "best_model/best_model.zip"
+MODEL_PATH = "sac_Rover2026_V1_model.zip"
 N_EPISODES = 5
 ROBOT = "Rover2026"
+
 
 # =============================================================================
 # ENVIRONMENT SETUP
@@ -59,6 +65,7 @@ env = RobosuiteGymWrapper(
     reward_shaping=True
 )
 
+
 # =============================================================================
 # LOAD MODEL
 # =============================================================================
@@ -69,8 +76,9 @@ if not os.path.exists(MODEL_PATH):
     env.close()
     exit(0)
 
-model = SAC.load(MODEL_PATH, env=env, device="cuda")
+model = SAC.load(MODEL_PATH, env=env, device="cpu")
 print(f"Model trained for {model.num_timesteps} timesteps")
+
 
 # =============================================================================
 # RUN EVALUATION WITH RENDERING

@@ -32,7 +32,7 @@ services:
     environment:
       - ROVERFLAKE_ROOT=/LearnFlake
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-      - MUJOCO_GL=egl
+      - MUJOCO_GL=${MUJOCO_GL:-glfw}
     # Bridge networking for Windows (host mode not available)
     network_mode: bridge
 
@@ -52,7 +52,7 @@ services:
     environment:
       - ROVERFLAKE_ROOT=/LearnFlake
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-      - MUJOCO_GL=egl
+      - MUJOCO_GL=${MUJOCO_GL:-glfw}
       # Display configuration for WSLg
       - DISPLAY=${DISPLAY:-:0}
       - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
@@ -73,9 +73,9 @@ services:
     environment:
       - ROVERFLAKE_ROOT=/LearnFlake
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-      - MUJOCO_GL=egl
-      # For VcXsrv on Windows (run XLaunch with "Disable access control" checked)
-      - DISPLAY=host.docker.internal:0.0
+      - MUJOCO_GL=${MUJOCO_GL:-glfw}
+      # Inherit DISPLAY from host; override to host.docker.internal:0.0 only when using VcXsrv on Windows
+      - DISPLAY=${DISPLAY:-:0}
       - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
       - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
       - PULSE_SERVER=/mnt/wslg/PulseServer
@@ -104,7 +104,7 @@ services:
     environment:
       - ROVERFLAKE_ROOT=/LearnFlake
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-      - MUJOCO_GL=egl
+      - MUJOCO_GL=${MUJOCO_GL:-glfw}
       - __GLX_VENDOR_LIBRARY_NAME=nvidia
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all

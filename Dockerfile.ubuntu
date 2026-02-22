@@ -165,8 +165,8 @@ RUN pip install -r ${ROVERFLAKE_ROOT}/src/rl_autonomy/requirements.txt 2>/dev/nu
 # MuJoCo Rendering Configuration
 # ============================================================================
 
-# Default to EGL (headless) rendering - change to glfw for GUI
-ENV MUJOCO_GL=egl
+# Default to GLFW (GUI). Override with MUJOCO_GL=egl for headless training.
+ENV MUJOCO_GL=glfw
 
 # For NVIDIA GPU support (uncomment if using GPU)
 # ENV __GLX_VENDOR_LIBRARY_NAME=nvidia
