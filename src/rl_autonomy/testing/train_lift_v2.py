@@ -51,13 +51,36 @@ from robosuite.controllers.composite.composite_controller_factory import refacto
 class GPUReplayBuffer:
     """
     GPU-resident replay buffer supporting both state and image observations.
-    Batched CPU->GPU transfers reduce PCIe overhead.
-    
-    Note: Images are stored on CPU to save GPU memory, transferred in batches during sampling.
+
+    Function:
+    - Stores transitions for off-policy SAC training.
+    - Keeps state/action/reward/done on GPU for fast sampling.
+    - Keeps images on CPU to avoid GPU memory pressure.
+
+    Inputs (stored per transition):
+    - obs: float32 state vector of shape [obs_dim]
+    - action: float32 action vector of shape [action_dim]
+    - reward: float scalar
+    - next_obs: float32 state vector
+    - done: float/bool terminal flag
+    - image / next_image: uint8 CHW image if use_images=True
+
+    Outputs:
+    - sample(batch_size) returns a dict of torch tensors on GPU:
+      obs, actions, rewards, next_obs, dones, and optional images.
     """
     
     def __init__(self, capacity, obs_dim, action_dim, device='cuda',
                  use_images=False, image_shape=(3, 84, 84)):
+        """
+        Args:
+            capacity: max number of transitions for state/action buffers.
+            obs_dim: length of state observation vector.
+            action_dim: length of action vector.
+            device: torch device for GPU-resident tensors.
+            use_images: whether to store and sample image observations.
+            image_shape: CHW shape for images (uint8 on CPU).
+        """
         self.capacity = capacity
         self.device = device
         self.ptr = 0
@@ -97,7 +120,14 @@ class GPUReplayBuffer:
         self._stream = torch.cuda.Stream(device=device)
     
     def add(self, obs, action, reward, next_obs, done, image=None, next_image=None):
-        """Stage transition in CPU buffer, flush to GPU when full."""
+        """
+        Stage a transition in the CPU staging buffer.
+
+        Inputs:
+        - obs, action, next_obs: np.ndarray or torch.Tensor
+        - reward, done: scalars
+        - image, next_image: optional uint8 CHW arrays (if use_images)
+        """
         idx = self._buffer_ptr
         self._obs_buf[idx] = torch.from_numpy(obs) if isinstance(obs, np.ndarray) else obs
         self._act_buf[idx] = torch.from_numpy(action) if isinstance(action, np.ndarray) else action
@@ -114,7 +144,12 @@ class GPUReplayBuffer:
             self._flush()
     
     def _flush(self):
-        """Batch transfer staged data to GPU."""
+        """
+        Flush staged CPU data to GPU tensors in a single batch.
+
+        Outputs:
+        - Updates internal GPU buffers and pointers; no return value.
+        """
         if self._buffer_ptr == 0:
             return
         n = self._buffer_ptr
@@ -155,7 +190,21 @@ class GPUReplayBuffer:
         self._buffer_ptr = 0
     
     def sample(self, batch_size):
-        """Sample directly from GPU memory."""
+        """
+        Sample a batch for training.
+
+        Args:
+            batch_size: number of transitions to sample.
+
+        Returns:
+            dict with tensors on GPU:
+            - obs: [B, obs_dim]
+            - actions: [B, action_dim]
+            - rewards: [B, 1]
+            - next_obs: [B, obs_dim]
+            - dones: [B, 1]
+            - images / next_images: [B, C, H, W] if use_images
+        """
         if self._buffer_ptr > 0:
             self._flush()
         idxs = torch.randint(0, self.size, (batch_size,), device=self.device)
@@ -185,7 +234,17 @@ class GPUReplayBuffer:
 # ============================================================================
 
 def mlp(sizes, activation=nn.SiLU, output_activation=nn.Identity):
-    """MLP with LayerNorm for mixed-precision stability."""
+    """
+    Build a LayerNorm-MLP.
+
+    Inputs:
+    - sizes: list like [in, h1, h2, ..., out]
+    - activation: hidden layer activation class
+    - output_activation: output layer activation class
+
+    Output:
+    - nn.Sequential MLP with LayerNorm on hidden layers
+    """
     layers = []
     for i in range(len(sizes) - 1):
         layers.append(nn.Linear(sizes[i], sizes[i + 1]))
@@ -218,14 +277,25 @@ class CNNEncoder(nn.Module):
         self.ln = nn.LayerNorm(feature_dim)
     
     def forward(self, x):
-        # x: (B, C, H, W)
+        """
+        Inputs:
+        - x: float tensor of shape [B, C, H, W] in [0, 1]
+
+        Outputs:
+        - feature vector [B, feature_dim]
+        """
         h = self.conv(x)
         h = self.ln(self.fc(h))
         return h
 
 
 class GaussianActor(nn.Module):
-    """Gaussian policy with optional image encoder."""
+    """
+    Gaussian policy with optional image encoder.
+
+    Function:
+    - Produces a squashed (tanh) continuous action distribution.
+    """
     
     LOG_STD_MIN, LOG_STD_MAX = -20, 2
     
@@ -245,6 +315,17 @@ class GaussianActor(nn.Module):
         self.log_std_layer = nn.Linear(hidden_sizes[-1], action_dim)
     
     def forward(self, obs, images=None, deterministic=False, with_logprob=True):
+        """
+        Inputs:
+        - obs: [B, obs_dim] float tensor
+        - images: optional [B, C, H, W] float tensor in [0, 1]
+        - deterministic: if True, return mean action
+        - with_logprob: if True, return log-prob under squashed Gaussian
+
+        Outputs:
+        - action: [B, action_dim] in [-1, 1] after tanh
+        - logprob: [B, 1] or None
+        """
         if self.use_images and images is not None:
             img_features = self.encoder(images)
             x = torch.cat([obs, img_features], dim=-1)
@@ -268,7 +349,17 @@ class GaussianActor(nn.Module):
 
 
 class Critic(nn.Module):
-    """Q-function with optional image encoder."""
+    """
+    Q-function with optional image encoder.
+
+    Inputs:
+    - obs: [B, obs_dim]
+    - action: [B, action_dim]
+    - images: optional [B, C, H, W]
+
+    Output:
+    - Q-value tensor [B, 1]
+    """
     
     def __init__(self, obs_dim, action_dim, hidden_sizes=(512, 512, 256),
                  use_images=False, image_feature_dim=256):
@@ -293,7 +384,12 @@ class Critic(nn.Module):
 
 
 class DoubleCritic(nn.Module):
-    """Twin Q-networks."""
+    """
+    Twin Q-networks (Q1, Q2) for clipped double Q-learning.
+
+    Output:
+    - tuple (q1, q2), each [B, 1]
+    """
     
     def __init__(self, obs_dim, action_dim, hidden_sizes=(512, 512, 256),
                  use_images=False, image_feature_dim=256):
@@ -323,6 +419,16 @@ class SkillSelector(nn.Module):
         self.net = mlp([obs_dim] + list(hidden_sizes) + [self.NUM_SKILLS])
     
     def forward(self, obs, deterministic=False):
+        """
+        Inputs:
+        - obs: [B, obs_dim]
+        - deterministic: if True, pick argmax skill
+
+        Outputs:
+        - skill: [B] int64 skill indices
+        - log_prob: [B, 1] or None (if deterministic)
+        - logits: [B, num_skills]
+        """
         logits = self.net(obs)
         
         if deterministic:
@@ -358,6 +464,18 @@ class SkillConditionedActor(nn.Module):
         self.action_smoothing = nn.Parameter(torch.tensor(0.3))
     
     def forward(self, obs, skill, prev_action=None, deterministic=False, with_logprob=True):
+        """
+        Inputs:
+        - obs: [B, obs_dim]
+        - skill: [B] int64 skill indices
+        - prev_action: optional [B, action_dim] for smoothing
+        - deterministic: if True, return mean action
+        - with_logprob: if True, return log-prob
+
+        Outputs:
+        - action: [B, action_dim] in [-1, 1]
+        - logprob: [B, 1] or None
+        """
         skill_embed = self.skill_embedding(skill)
         x = torch.cat([obs, skill_embed], dim=-1)
         
@@ -407,6 +525,16 @@ class HierarchicalSACAgent:
         use_amp=True,
         use_images=False,
     ):
+        """
+        Inputs:
+        - obs_dim: size of state vector
+        - action_dim: size of action vector
+        - hidden_sizes: MLP sizes for actor/critic
+        - lr, gamma, tau: SAC hyperparameters
+        - device: torch device
+        - use_amp: use mixed precision on CUDA
+        - use_images: whether critics accept image inputs
+        """
         self.gamma = gamma
         self.tau = tau
         self.device = device
@@ -468,11 +596,26 @@ class HierarchicalSACAgent:
         return self.log_alpha_action.exp().item()
     
     def reset(self):
-        """Reset agent state (call at episode start)."""
+        """
+        Reset per-episode state.
+
+        Output:
+        - None. Clears previous action used for smoothing.
+        """
         self.prev_action = None
     
     def get_action(self, obs, deterministic=False):
-        """Get action for a single observation."""
+        """
+        Get action for a single observation.
+
+        Inputs:
+        - obs: [obs_dim] numpy array
+        - deterministic: if True, use mean action and argmax skill
+
+        Outputs:
+        - action: [action_dim] numpy array in [-1, 1]
+        - skill: int skill index
+        """
         if hasattr(torch, "compiler") and hasattr(torch.compiler, "cudagraph_mark_step_begin"):
             torch.compiler.cudagraph_mark_step_begin()
         
@@ -494,7 +637,16 @@ class HierarchicalSACAgent:
         return action, skill.cpu().numpy()[0]
     
     def update(self, replay_buffer, batch_size=1024):
-        """Update all networks."""
+        """
+        Update actor, critics, skill selector, and entropy terms.
+
+        Inputs:
+        - replay_buffer: GPUReplayBuffer
+        - batch_size: number of samples per update
+
+        Outputs:
+        - metrics dict with losses and alphas (floats)
+        """
         if hasattr(torch, "compiler") and hasattr(torch.compiler, "cudagraph_mark_step_begin"):
             torch.compiler.cudagraph_mark_step_begin()
         
@@ -598,6 +750,12 @@ class HierarchicalSACAgent:
         }
     
     def save(self, filepath):
+        """
+        Save model and optimizer state.
+
+        Input:
+        - filepath: destination .pt path
+        """
         torch.save({
             'skill_selector': self.skill_selector.state_dict(),
             'actor': self.actor.state_dict(),
@@ -612,6 +770,13 @@ class HierarchicalSACAgent:
         }, filepath)
     
     def load(self, filepath, resume_training=False):
+        """
+        Load model weights (and optionally optimizer state).
+
+        Inputs:
+        - filepath: checkpoint path
+        - resume_training: if True, restores optimizers and scalers
+        """
         checkpoint = torch.load(filepath, map_location=self.device, weights_only=False)
         self.skill_selector.load_state_dict(checkpoint['skill_selector'])
         self.actor.load_state_dict(checkpoint['actor'])
@@ -644,6 +809,12 @@ class RoboSuiteEnvV2:
     CAMERA_NAME = "robot0_eye_in_hand"  # Gripper camera for egocentric view
     
     def __init__(self, render=False, use_camera=False, domain_randomization=True):
+        """
+        Inputs:
+        - render: enable onscreen renderer
+        - use_camera: include gripper camera in observations
+        - domain_randomization: randomize cube position each reset
+        """
         arm_controller_config = suite.load_part_controller_config(default_controller="JOINT_VELOCITY")
         controller_config = refactor_composite_controller_config(arm_controller_config, "Rover2026", ["right"])
         
@@ -677,6 +848,12 @@ class RoboSuiteEnvV2:
         self.cube_y_range = (-0.1, 0.1)
     
     def _setup_spaces(self):
+        """
+        Derive observation and action dimensions from a reset.
+
+        Output:
+        - sets self.obs_dim, self.action_dim, self.image_shape
+        """
         obs = self.env.reset()
         
         self.obs_keys = [
@@ -695,7 +872,15 @@ class RoboSuiteEnvV2:
         self.image_shape = (3, self.image_size, self.image_size) if self.use_camera else None
     
     def _compute_phase(self, obs):
-        """Compute current task phase from observations."""
+        """
+        Compute task phase from observation dict.
+
+        Input:
+        - obs: robosuite observation dict
+
+        Output:
+        - phase: one-hot [4] for reach/grasp/lift/hold
+        """
         cube_pos = obs.get('cube_pos', [0, 0, 0])
         gripper_to_cube = obs.get('gripper_to_cube_pos', [0, 0, 0])
         gripper_qpos = obs.get('robot0_gripper_qpos', [0, 0])
@@ -717,6 +902,15 @@ class RoboSuiteEnvV2:
         return phase
     
     def _process_obs(self, obs):
+        """
+        Flatten selected observation keys and append phase one-hot.
+
+        Input:
+        - obs: robosuite observation dict
+
+        Output:
+        - state vector float32 [obs_dim]
+        """
         obs_list = []
         for key in self.obs_keys:
             if key in obs:
@@ -728,6 +922,15 @@ class RoboSuiteEnvV2:
         return np.concatenate([base_obs, phase]).astype(np.float32)
     
     def _process_image(self, obs):
+        """
+        Extract gripper camera image in CHW uint8 format.
+
+        Input:
+        - obs: robosuite observation dict
+
+        Output:
+        - image: uint8 [C, H, W] or None
+        """
         if not self.use_camera:
             return None
         # Camera observation key format: {camera_name}_image
@@ -740,7 +943,12 @@ class RoboSuiteEnvV2:
         return img
     
     def _randomize_cube_position(self):
-        """Randomize cube position within bounds."""
+        """
+        Randomize cube position within bounds (if enabled).
+
+        Output:
+        - None. Updates MuJoCo body position in-place.
+        """
         if not self.domain_randomization:
             return
         
@@ -759,6 +967,13 @@ class RoboSuiteEnvV2:
             pass  # Cube randomization not supported
     
     def reset(self):
+        """
+        Reset environment and return processed observation.
+
+        Output:
+        - state: [obs_dim] float32
+        - image: optional uint8 [C, H, W] if use_camera
+        """
         obs = self.env.reset()
         self._randomize_cube_position()
         obs = self.env._get_observations()  # Re-get observations after randomization
@@ -771,6 +986,19 @@ class RoboSuiteEnvV2:
         return state
     
     def step(self, action, skill=None):
+        """
+        Step the environment with optional skill for reward shaping.
+
+        Inputs:
+        - action: [action_dim] numpy array in [-1, 1]
+        - skill: optional int skill index (for small bonus)
+
+        Outputs:
+        - (state, image) if use_camera else state
+        - shaped_reward: float
+        - done: bool
+        - info: dict with phase diagnostics
+        """
         obs, reward, done, info = self.env.step(action)
         
         # Get positions
@@ -862,10 +1090,12 @@ class RoboSuiteEnvV2:
         return state, shaped_reward, done, info
     
     def render(self):
+        """Render onscreen if enabled."""
         if self.render_enabled:
             self.env.render()
     
     def close(self):
+        """Close the underlying robosuite env."""
         self.env.close()
 
 
@@ -874,6 +1104,13 @@ class RoboSuiteEnvV2:
 # ============================================================================
 
 def worker_v2(remote, parent_remote, env_fn):
+    """
+    Subprocess worker for a single environment.
+
+    Inputs:
+    - remote/parent_remote: multiprocessing Pipes
+    - env_fn: callable that builds a RoboSuiteEnvV2
+    """
     parent_remote.close()
     env = env_fn()
     use_camera = env.use_camera
@@ -907,9 +1144,21 @@ def worker_v2(remote, parent_remote, env_fn):
 
 
 class SubprocVecEnvV2:
-    """Parallel environments with camera support."""
+    """
+    Parallel environments with camera support.
+
+    Function:
+    - Launches N subprocess envs and provides vectorized step/reset.
+    """
     
     def __init__(self, env_fns):
+        """
+        Inputs:
+        - env_fns: list of callables returning RoboSuiteEnvV2
+
+        Outputs:
+        - sets obs_dim, action_dim, use_camera, image_shape
+        """
         self.num_envs = len(env_fns)
         self.remotes, self.work_remotes = zip(*[mp.Pipe() for _ in range(self.num_envs)])
         self.ps = [mp.Process(target=worker_v2, args=(wr, r, fn))
@@ -925,6 +1174,16 @@ class SubprocVecEnvV2:
         self.closed = False
     
     def step(self, actions, skills=None):
+        """
+        Step all environments.
+
+        Inputs:
+        - actions: [N, action_dim] numpy array
+        - skills: optional list/array of length N
+
+        Outputs:
+        - states (and images if use_camera), rewards, dones, infos
+        """
         if skills is None:
             skills = [None] * len(actions)
         for remote, action, skill in zip(self.remotes, actions, skills):
@@ -939,6 +1198,12 @@ class SubprocVecEnvV2:
             return np.stack(states), np.array(rewards), np.array(dones), infos
     
     def reset(self):
+        """
+        Reset all environments.
+
+        Output:
+        - states or (states, images) depending on use_camera
+        """
         for remote in self.remotes:
             remote.send(('reset', None))
         results = [remote.recv() for remote in self.remotes]
@@ -950,6 +1215,7 @@ class SubprocVecEnvV2:
             return np.stack(results)
     
     def close(self):
+        """Close all subprocess environments."""
         if self.closed:
             return
         for remote in self.remotes:
@@ -964,6 +1230,16 @@ class SubprocVecEnvV2:
 # ============================================================================
 
 def train(args):
+    """
+    Train hierarchical SAC on the RoboSuite Lift task.
+
+    Inputs:
+    - args: argparse Namespace (see __main__ for flags)
+
+    Outputs:
+    - Saves checkpoints to checkpoints_v2/<timestamp>
+    - Prints training logs to stdout
+    """
     device = torch.device('cuda' if torch.cuda.is_available() and args.cuda else 'cpu')
     
     if args.cuda and device.type == 'cpu':
@@ -1159,6 +1435,14 @@ def evaluate(args):
     Evaluate trained model with visualization.
     - Main window: Birdview camera (default RoboSuite renderer)
     - Optional second window: Gripper camera view (OpenCV)
+
+    Inputs:
+    - args.eval: checkpoint path
+    - args.use_camera: show gripper camera window
+    - args.domain_rand: apply cube randomization
+
+    Outputs:
+    - Renders episodes, prints reward/skill usage per episode
     """
     import cv2
     
