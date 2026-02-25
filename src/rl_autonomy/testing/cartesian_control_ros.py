@@ -192,6 +192,44 @@ class MujocoBridgeNode(Node):
         self.angular_speed_scale = angular_speed  # Scale joystick [-1,1] → rad/s
         self.damping = 0.01                       # Damped least-squares lambda
 
+        # ---- Singularity protection (mirrors MoveIt Servo params) ----
+        # From rover_servo_params_dev_arm.yaml:
+        #   lower_singularity_threshold: 1000.0
+        #   hard_stop_singularity_threshold: 5000.0
+        #   leaving_singularity_threshold_multiplier: 2.0
+        self.lower_singularity_threshold = 1000.0
+        self.hard_stop_singularity_threshold = 5000.0
+        self.leaving_singularity_multiplier = 2.0
+        self._was_in_singularity = False
+
+        # ---- Joint-limit margin deceleration (mirrors Servo joint_limit_margin) ----
+        # Servo param: joint_limit_margin: 0.01 rad
+        # We use a wider soft margin to start decelerating before hitting the hard limit
+        self.joint_limit_margin = 0.01   # Hard stop margin (rad) — same as Servo
+        self.joint_limit_decel_zone = 0.1  # Start decelerating this far from limit (rad)
+
+        # Joint limits from URDF (matching robot.xml after our fix)
+        # Format: (lower, upper) in radians.  None = unlimited
+        self.joint_limits = [
+            (-0.22, 5.5),       # shoulder_joint
+            (-3.14, 0.0),       # link_1_joint
+            (0.0,   3.14),      # link1_link2
+            (-1.57, 1.57),      # a4_rotation
+            (-3.14, 3.14),      # a5_rotation
+            None,               # a6_rotation (continuous)
+        ]
+
+        # Max joint velocities from joint_limits.yaml (MoveIt)
+        # These cap the normalized [-1,1] output velocity
+        self.max_joint_velocities = [
+            1.0,   # shoulder_joint
+            1.0,   # link_1_joint
+            0.8,   # link1_link2
+            0.8,   # a4_rotation
+            0.8,   # a5_rotation
+            1.0,   # a6_rotation
+        ]
+
         # ---- State ----
         self._twist_lin = np.zeros(3, dtype=np.float64)   # EE-frame linear vel
         self._twist_ang = np.zeros(3, dtype=np.float64)   # EE-frame angular vel
@@ -287,13 +325,16 @@ class MujocoBridgeNode(Node):
     def _twist_to_joint_velocities(self, twist_lin_ee, twist_ang_ee) -> np.ndarray:
         """
         Convert EE-frame Cartesian twist → joint velocities via Jacobian IK.
+        Includes singularity protection matching MoveIt Servo behavior.
 
         Steps:
             1. Scale joystick range [-1, 1] to physical velocities (m/s, rad/s)
             2. Rotate twist from EE frame to world frame using EE orientation
             3. Build 6D twist [linear; angular] in world frame
-            4. Compute damped least-squares pseudoinverse of the arm Jacobian
-            5. Return joint velocities (num_arm_joints,)
+            4. Check singularity via Jacobian condition number → scale vel down
+            5. Compute damped least-squares pseudoinverse of the arm Jacobian
+            6. Apply joint-limit proximity deceleration
+            7. Return joint velocities (num_arm_joints,)
         """
         # Scale joystick values to physical velocities
         cart_vel_ee = twist_lin_ee * self.linear_speed_scale
@@ -314,6 +355,11 @@ class MujocoBridgeNode(Node):
         # Extract columns for arm joints only (first num_arm_joints DoFs)
         J_arm = J_full[:, :self.num_arm_joints]  # (6, 6)
 
+        # ---- Singularity protection (condition number check) ----
+        # Mirrors MoveIt Servo: decelerate between lower and hard_stop thresholds
+        singularity_scale = self._compute_singularity_scale(J_arm)
+        twist_world *= singularity_scale
+
         # Damped least-squares: q̇ = Jᵀ (J Jᵀ + λ²I)⁻¹ ẋ
         JJT = J_arm @ J_arm.T
         damped = JJT + self.damping**2 * np.eye(6)
@@ -321,6 +367,104 @@ class MujocoBridgeNode(Node):
             joint_vel = J_arm.T @ np.linalg.solve(damped, twist_world)
         except np.linalg.LinAlgError:
             joint_vel = np.linalg.pinv(J_arm) @ twist_world
+
+        # ---- Joint limit proximity deceleration ----
+        joint_vel = self._apply_joint_limit_decel(joint_vel)
+
+        # ---- Cap per-joint max velocity (from MoveIt joint_limits.yaml) ----
+        for i in range(self.num_arm_joints):
+            max_v = self.max_joint_velocities[i]
+            joint_vel[i] = np.clip(joint_vel[i], -max_v, max_v)
+
+        return joint_vel
+
+    def _compute_singularity_scale(self, J_arm: np.ndarray) -> float:
+        """
+        Compute velocity scaling factor based on Jacobian condition number.
+        Mirrors MoveIt Servo singularity handling:
+          - Below lower_threshold: scale = 1.0 (no slowdown)
+          - Between lower and hard_stop: linear ramp from 1.0 → 0.0
+          - Above hard_stop: scale = 0.0 (full stop)
+          - When leaving singularity: use multiplied threshold for hysteresis
+        """
+        try:
+            sv = np.linalg.svd(J_arm, compute_uv=False)
+            if sv[-1] < 1e-10:
+                cond = float('inf')
+            else:
+                cond = sv[0] / sv[-1]
+        except np.linalg.LinAlgError:
+            cond = float('inf')
+
+        # Hysteresis: when leaving singularity, use a wider threshold
+        if self._was_in_singularity:
+            effective_hard_stop = (self.hard_stop_singularity_threshold
+                                   * self.leaving_singularity_multiplier)
+        else:
+            effective_hard_stop = self.hard_stop_singularity_threshold
+
+        if cond >= effective_hard_stop:
+            self._was_in_singularity = True
+            self.get_logger().warn(
+                f"SINGULARITY HARD STOP (cond={cond:.0f} >= {effective_hard_stop:.0f})",
+                throttle_duration_sec=1.0,
+            )
+            return 0.0
+        elif cond >= self.lower_singularity_threshold:
+            # Linear ramp from 1.0 → 0.0
+            t = ((cond - self.lower_singularity_threshold)
+                 / (effective_hard_stop - self.lower_singularity_threshold))
+            scale = 1.0 - t
+            self.get_logger().info(
+                f"Near singularity (cond={cond:.0f}, scale={scale:.2f})",
+                throttle_duration_sec=1.0,
+            )
+            return max(scale, 0.0)
+        else:
+            self._was_in_singularity = False
+            return 1.0
+
+    def _apply_joint_limit_decel(self, joint_vel: np.ndarray) -> np.ndarray:
+        """
+        Decelerate joints approaching their limits.
+        Mirrors MoveIt Servo joint_limit_margin behavior:
+          - Within joint_limit_margin of limit: velocity set to 0 (hard stop)
+          - Within joint_limit_decel_zone: linearly scale velocity toward 0
+        Only affects velocity in the direction toward the limit.
+        """
+        # Get current joint positions from MuJoCo
+        qpos = np.array([
+            self.data.qpos[self.model.joint_name2id(name)]
+            for name in self.arm_joint_names
+        ])
+
+        for i in range(self.num_arm_joints):
+            limits = self.joint_limits[i]
+            if limits is None:
+                continue  # Unlimited joint
+
+            lower, upper = limits
+
+            # Check proximity to lower limit (only if moving toward it)
+            if joint_vel[i] < 0:
+                dist_to_lower = qpos[i] - lower
+                if dist_to_lower <= self.joint_limit_margin:
+                    joint_vel[i] = 0.0
+                elif dist_to_lower <= self.joint_limit_decel_zone:
+                    # Linear ramp: 0 at margin → 1 at decel_zone
+                    t = ((dist_to_lower - self.joint_limit_margin)
+                         / (self.joint_limit_decel_zone - self.joint_limit_margin))
+                    joint_vel[i] *= t
+
+            # Check proximity to upper limit (only if moving toward it)
+            if joint_vel[i] > 0:
+                dist_to_upper = upper - qpos[i]
+                if dist_to_upper <= self.joint_limit_margin:
+                    joint_vel[i] = 0.0
+                elif dist_to_upper <= self.joint_limit_decel_zone:
+                    t = ((dist_to_upper - self.joint_limit_margin)
+                         / (self.joint_limit_decel_zone - self.joint_limit_margin))
+                    joint_vel[i] *= t
 
         return joint_vel
 
