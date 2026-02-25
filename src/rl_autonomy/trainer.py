@@ -50,7 +50,7 @@ def train_v3(args):
     action_dim = vec_env.action_dim
     
     print(f"  Environments: {num_envs} parallel")
-    print(f"  Observation dim: {obs_dim} (27 base + 5 phase + 3 state)")
+    print(f"  Observation dim: {obs_dim} (27 base + 6 phase + 3 state)")
     print(f"  Action dim: {action_dim}")
     
     # Create agent

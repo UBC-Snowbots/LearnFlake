@@ -69,6 +69,8 @@ services:
     volumes:
       - ./:/LearnFlake
       - /tmp/.X11-unix:/tmp/.X11-unix
+    devices:
+      - "/dev/input:/dev/input/"
     deploy:
       resources:
         reservations:

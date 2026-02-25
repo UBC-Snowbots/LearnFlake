@@ -38,7 +38,7 @@ class HierarchicalSACAgentV3:
         
         # Networks
         self.skill_selector = SkillSelectorV3(obs_dim).to(device)
-        self.actor = SkillConditionedActorV3(obs_dim, action_dim, num_skills=5).to(device)
+        self.actor = SkillConditionedActorV3(obs_dim, action_dim, num_skills=SkillSelectorV3.NUM_SKILLS).to(device)
         self.critic = DoubleCritic(obs_dim, action_dim).to(device)
         self.critic_target = DoubleCritic(obs_dim, action_dim).to(device)
         self.critic_target.load_state_dict(self.critic.state_dict())
@@ -237,10 +237,58 @@ class HierarchicalSACAgentV3:
         def clean_state_dict(sd):
             return {k.replace('_orig_mod.', ''): v for k, v in sd.items()}
         
-        self.skill_selector.load_state_dict(clean_state_dict(skill_state))
-        self.actor.load_state_dict(clean_state_dict(actor_state))
-        self.critic.load_state_dict(clean_state_dict(critic_state))
-        self.critic_target.load_state_dict(clean_state_dict(target_state))
+        # --- Adaptive loading: handle skill/obs expansion (e.g. 5→6 skills) ---
+        def _adapt_state_dict(src_sd, tgt_sd, label=""):
+            """Copy src weights into tgt, expanding mismatched layers gracefully."""
+            adapted = dict(tgt_sd)  # start from current (correctly-sized) state
+            mismatches = []
+            for key in src_sd:
+                if key not in adapted:
+                    continue
+                src_t = src_sd[key]
+                tgt_t = adapted[key]
+                if src_t.shape == tgt_t.shape:
+                    adapted[key] = src_t
+                else:
+                    mismatches.append(key)
+                    # Handle dimension expansion for each axis
+                    slices = tuple(slice(0, min(s, t)) for s, t in zip(src_t.shape, tgt_t.shape))
+                    adapted[key][slices] = src_t[slices]
+                    # New neurons get small random init (weights) or zero (bias)
+                    if src_t.dim() == 1:
+                        adapted[key][src_t.shape[0]:] = 0.0
+                    elif src_t.dim() == 2:
+                        # Rows beyond src → mean of existing + noise
+                        if src_t.shape[0] < tgt_t.shape[0]:
+                            mean_w = src_t.mean(dim=0)
+                            for i in range(src_t.shape[0], tgt_t.shape[0]):
+                                adapted[key][i, :src_t.shape[1]] = mean_w + 0.1 * torch.randn(src_t.shape[1], device=src_t.device)
+            if mismatches:
+                print(f"  ⚠ {label}: adapted {len(mismatches)} layers with shape mismatch: {mismatches}")
+            return adapted
+        
+        clean_skill = clean_state_dict(skill_state)
+        clean_actor = clean_state_dict(actor_state)
+        clean_critic = clean_state_dict(critic_state)
+        clean_target = clean_state_dict(target_state)
+        
+        # Check if any shapes differ (old checkpoint vs new architecture)
+        needs_adapt = any(
+            clean_skill.get(k, torch.tensor([])).shape != v.shape
+            for k, v in self.skill_selector.state_dict().items() if k in clean_skill
+        )
+        
+        if needs_adapt:
+            print(f"  🔄 Checkpoint has different architecture — adapting weights...")
+            clean_skill = _adapt_state_dict(clean_skill, self.skill_selector.state_dict(), "SkillSelector")
+            clean_actor = _adapt_state_dict(clean_actor, self.actor.state_dict(), "Actor")
+            clean_critic = _adapt_state_dict(clean_critic, self.critic.state_dict(), "Critic")
+            clean_target = _adapt_state_dict(clean_target, self.critic_target.state_dict(), "CriticTarget")
+        
+        self.skill_selector.load_state_dict(clean_skill)
+        self.actor.load_state_dict(clean_actor)
+        self.critic.load_state_dict(clean_critic)
+        self.critic_target.load_state_dict(clean_target)
         
         if resume_training:
             # Try to load optimizer states, but handle mismatches gracefully
