@@ -124,6 +124,9 @@ class DemoRecorderNode(Node):
 
         # State
         self._latest_action: np.ndarray | None = None
+        self._latest_obs: np.ndarray | None = None
+        self._pending_action = False
+        self._pending_obs = False
         self._lock = threading.Lock()
         self._current_episode = EpisodeBuffer()
         self._saved_episodes: list[dict] = []
@@ -159,15 +162,26 @@ class DemoRecorderNode(Node):
     def _action_cb(self, msg: Float64MultiArray):
         with self._lock:
             self._latest_action = np.array(msg.data, dtype=np.float32)
+            self._pending_action = True
+        self._try_commit_sample()
 
     def _obs_cb(self, msg: Float64MultiArray):
-        """Pair latest action with this observation and buffer it."""
         with self._lock:
-            action = self._latest_action
-        if action is None:
-            return  # No action received yet
+            self._latest_obs = np.array(msg.data, dtype=np.float32)
+            self._pending_obs = True
+        self._try_commit_sample()
 
-        obs = np.array(msg.data, dtype=np.float32)
+    def _try_commit_sample(self):
+        """Buffer one sample only when both a fresh obs and action are present."""
+        with self._lock:
+            if not (self._pending_action and self._pending_obs):
+                return
+            if self._latest_action is None or self._latest_obs is None:
+                return
+            action = self._latest_action.copy()
+            obs = self._latest_obs.copy()
+            self._pending_action = False
+            self._pending_obs = False
 
         # Determine phase from obs (last 4 elements are the phase one-hot)
         phase_onehot = obs[-4:]

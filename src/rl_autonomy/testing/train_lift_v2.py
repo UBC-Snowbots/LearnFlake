@@ -22,6 +22,7 @@ import os
 import sys
 import time
 import argparse
+import glob
 import numpy as np
 import multiprocessing as mp
 from collections import deque
@@ -35,6 +36,11 @@ import torch.optim as optim
 from torch.amp import GradScaler
 from torch.distributions import Normal, Categorical
 
+try:
+    import h5py
+except ImportError:
+    h5py = None
+
 # Path setup
 ROOT = os.path.dirname(os.path.abspath(__file__))
 ROBO_PATH = os.path.join(ROOT, "..", "..", "external_pkgs", "RoboSuite")
@@ -42,6 +48,167 @@ sys.path.insert(0, ROBO_PATH)
 
 import robosuite as suite
 from robosuite.controllers.composite.composite_controller_factory import refactor_composite_controller_config
+
+
+def _system_ram_gb() -> float:
+    """Best-effort system RAM size in GiB without extra deps."""
+    try:
+        page = os.sysconf("SC_PAGE_SIZE")
+        pages = os.sysconf("SC_PHYS_PAGES")
+        return (page * pages) / (1024 ** 3)
+    except Exception:
+        return 0.0
+
+
+def _available_ram_gb() -> float:
+    """Best-effort available RAM in GiB (Linux MemAvailable)."""
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    kb = float(line.split()[1])
+                    return kb / (1024 ** 2)
+    except Exception:
+        pass
+    return 0.0
+
+
+def _apply_low_memory_profile(args):
+    """Clamp high-cost defaults for 8GB VRAM / 16GB RAM class laptops."""
+    if not args.low_mem:
+        return
+
+    # Only overwrite if user left a default-style value.
+    if args.num_envs >= 4:
+        args.num_envs = 2
+    if args.batch_size >= 256:
+        args.batch_size = 128
+    if args.updates_per_step >= 2:
+        args.updates_per_step = 1
+    if args.buffer_size >= 250_000:
+        args.buffer_size = 120_000
+    if args.warmup_steps >= 1000:
+        args.warmup_steps = 500
+    args.no_compile = True
+    args.no_amp = True
+    args.sync_replay = True
+
+    print("[low_mem] Applied low-memory profile:")
+    print(f"  num_envs={args.num_envs} batch_size={args.batch_size} "
+          f"updates_per_step={args.updates_per_step}")
+    print(f"  buffer_size={args.buffer_size} warmup_steps={args.warmup_steps} "
+          f"no_compile={args.no_compile} no_amp={args.no_amp} sync_replay={args.sync_replay}")
+
+
+def _expand_hdf5_patterns(patterns):
+    """Expand glob patterns to concrete HDF5 file paths."""
+    paths = []
+    for pat in patterns:
+        expanded = sorted(glob.glob(pat))
+        if expanded:
+            paths.extend(expanded)
+        elif os.path.exists(pat):
+            paths.append(pat)
+    # Deduplicate while preserving order
+    out = []
+    seen = set()
+    for p in paths:
+        if p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out
+
+
+def load_demo_transitions(hdf5_paths, obs_dim, action_dim):
+    """Load demo transitions from demo_recorder-style HDF5 files."""
+    if h5py is None:
+        raise RuntimeError("h5py is required for --demo_data but is not installed.")
+
+    obs_all, act_all, next_obs_all, rew_all, done_all = [], [], [], [], []
+    num_files = 0
+    num_demos = 0
+    skipped = 0
+
+    for path in hdf5_paths:
+        if not os.path.exists(path):
+            continue
+        num_files += 1
+        with h5py.File(path, "r") as f:
+            if "data" not in f:
+                continue
+            for demo_key in sorted(f["data"].keys()):
+                demo = f["data"][demo_key]
+                if "obs" not in demo or "actions" not in demo:
+                    continue
+                obs = np.array(demo["obs"], dtype=np.float32)
+                actions = np.array(demo["actions"], dtype=np.float32)
+                T = min(len(obs), len(actions))
+                if T <= 0:
+                    continue
+                obs = obs[:T]
+                actions = actions[:T]
+                if obs.ndim != 2 or actions.ndim != 2:
+                    skipped += 1
+                    continue
+                if obs.shape[1] != obs_dim or actions.shape[1] != action_dim:
+                    skipped += 1
+                    continue
+
+                if "rewards" in demo:
+                    rewards = np.array(demo["rewards"], dtype=np.float32)[:T]
+                else:
+                    rewards = np.zeros(T, dtype=np.float32)
+
+                if "dones" in demo:
+                    dones = np.array(demo["dones"], dtype=np.float32)[:T]
+                else:
+                    dones = np.zeros(T, dtype=np.float32)
+                    dones[-1] = 1.0
+
+                next_obs = np.concatenate([obs[1:], obs[-1:]], axis=0).astype(np.float32)
+
+                obs_all.append(obs)
+                act_all.append(actions)
+                next_obs_all.append(next_obs)
+                rew_all.append(rewards.reshape(-1, 1))
+                done_all.append(dones.reshape(-1, 1))
+                num_demos += 1
+
+    if not obs_all:
+        return None
+
+    data = {
+        "obs": np.concatenate(obs_all, axis=0),
+        "actions": np.concatenate(act_all, axis=0),
+        "next_obs": np.concatenate(next_obs_all, axis=0),
+        "rewards": np.concatenate(rew_all, axis=0),
+        "dones": np.concatenate(done_all, axis=0),
+    }
+    data["meta"] = {
+        "num_files": num_files,
+        "num_demos": num_demos,
+        "num_steps": int(data["obs"].shape[0]),
+        "skipped_demos": skipped,
+    }
+    return data
+
+
+class DemoBatchBuffer:
+    """Static demo mini-batch sampler for BC regularization."""
+
+    def __init__(self, obs, actions, device="cuda"):
+        self.device = device
+        self.obs = torch.as_tensor(obs, dtype=torch.float32, device=device)
+        self.actions = torch.as_tensor(actions, dtype=torch.float32, device=device)
+        self.size = int(self.obs.shape[0])
+
+    def sample(self, batch_size):
+        batch_size = min(int(batch_size), self.size)
+        idx = torch.randint(0, self.size, (batch_size,), device=self.device)
+        return {
+            "obs": self.obs[idx],
+            "actions": self.actions[idx],
+        }
 
 
 # ============================================================================
@@ -71,7 +238,8 @@ class GPUReplayBuffer:
     """
     
     def __init__(self, capacity, obs_dim, action_dim, device='cuda',
-                 use_images=False, image_shape=(3, 84, 84)):
+                 use_images=False, image_shape=(3, 84, 84),
+                 async_copy=True):
         """
         Args:
             capacity: max number of transitions for state/action buffers.
@@ -80,6 +248,7 @@ class GPUReplayBuffer:
             device: torch device for GPU-resident tensors.
             use_images: whether to store and sample image observations.
             image_shape: CHW shape for images (uint8 on CPU).
+            async_copy: use async CUDA stream for H2D flushes.
         """
         self.capacity = capacity
         self.device = device
@@ -87,6 +256,7 @@ class GPUReplayBuffer:
         self.size = 0
         self.use_images = use_images
         self.image_shape = image_shape
+        self.async_copy = bool(async_copy and device != 'cpu')
         
         # Pre-allocate GPU tensors for state observations
         self.obs = torch.zeros((capacity, obs_dim), dtype=torch.float32, device=device)
@@ -117,7 +287,7 @@ class GPUReplayBuffer:
             self._img_buf = np.zeros((self._buffer_size, *image_shape), dtype=np.uint8)
             self._next_img_buf = np.zeros((self._buffer_size, *image_shape), dtype=np.uint8)
         
-        self._stream = torch.cuda.Stream(device=device)
+        self._stream = torch.cuda.Stream(device=device) if self.async_copy else None
     
     def add(self, obs, action, reward, next_obs, done, image=None, next_image=None):
         """
@@ -154,27 +324,32 @@ class GPUReplayBuffer:
             return
         n = self._buffer_ptr
         
-        with torch.cuda.stream(self._stream):
-            end = (self.ptr + n) % self.capacity
+        def _copy_into_device(non_blocking_flag):
             if self.ptr + n <= self.capacity:
-                self.obs[self.ptr:self.ptr + n] = self._obs_buf[:n].to(self.device, non_blocking=True)
-                self.actions[self.ptr:self.ptr + n] = self._act_buf[:n].to(self.device, non_blocking=True)
-                self.rewards[self.ptr:self.ptr + n] = self._rew_buf[:n].to(self.device, non_blocking=True)
-                self.next_obs[self.ptr:self.ptr + n] = self._next_buf[:n].to(self.device, non_blocking=True)
-                self.dones[self.ptr:self.ptr + n] = self._done_buf[:n].to(self.device, non_blocking=True)
+                self.obs[self.ptr:self.ptr + n] = self._obs_buf[:n].to(self.device, non_blocking=non_blocking_flag)
+                self.actions[self.ptr:self.ptr + n] = self._act_buf[:n].to(self.device, non_blocking=non_blocking_flag)
+                self.rewards[self.ptr:self.ptr + n] = self._rew_buf[:n].to(self.device, non_blocking=non_blocking_flag)
+                self.next_obs[self.ptr:self.ptr + n] = self._next_buf[:n].to(self.device, non_blocking=non_blocking_flag)
+                self.dones[self.ptr:self.ptr + n] = self._done_buf[:n].to(self.device, non_blocking=non_blocking_flag)
             else:
                 # Handle wrap-around
                 first = self.capacity - self.ptr
-                self.obs[self.ptr:] = self._obs_buf[:first].to(self.device, non_blocking=True)
-                self.obs[:n-first] = self._obs_buf[first:n].to(self.device, non_blocking=True)
-                self.actions[self.ptr:] = self._act_buf[:first].to(self.device, non_blocking=True)
-                self.actions[:n-first] = self._act_buf[first:n].to(self.device, non_blocking=True)
-                self.rewards[self.ptr:] = self._rew_buf[:first].to(self.device, non_blocking=True)
-                self.rewards[:n-first] = self._rew_buf[first:n].to(self.device, non_blocking=True)
-                self.next_obs[self.ptr:] = self._next_buf[:first].to(self.device, non_blocking=True)
-                self.next_obs[:n-first] = self._next_buf[first:n].to(self.device, non_blocking=True)
-                self.dones[self.ptr:] = self._done_buf[:first].to(self.device, non_blocking=True)
-                self.dones[:n-first] = self._done_buf[first:n].to(self.device, non_blocking=True)
+                self.obs[self.ptr:] = self._obs_buf[:first].to(self.device, non_blocking=non_blocking_flag)
+                self.obs[:n-first] = self._obs_buf[first:n].to(self.device, non_blocking=non_blocking_flag)
+                self.actions[self.ptr:] = self._act_buf[:first].to(self.device, non_blocking=non_blocking_flag)
+                self.actions[:n-first] = self._act_buf[first:n].to(self.device, non_blocking=non_blocking_flag)
+                self.rewards[self.ptr:] = self._rew_buf[:first].to(self.device, non_blocking=non_blocking_flag)
+                self.rewards[:n-first] = self._rew_buf[first:n].to(self.device, non_blocking=non_blocking_flag)
+                self.next_obs[self.ptr:] = self._next_buf[:first].to(self.device, non_blocking=non_blocking_flag)
+                self.next_obs[:n-first] = self._next_buf[first:n].to(self.device, non_blocking=non_blocking_flag)
+                self.dones[self.ptr:] = self._done_buf[:first].to(self.device, non_blocking=non_blocking_flag)
+                self.dones[:n-first] = self._done_buf[first:n].to(self.device, non_blocking=non_blocking_flag)
+
+        if self.async_copy:
+            with torch.cuda.stream(self._stream):
+                _copy_into_device(True)
+        else:
+            _copy_into_device(False)
         
         # Store images on CPU (separate pointer for smaller image buffer)
         if self.use_images:
@@ -524,6 +699,7 @@ class HierarchicalSACAgent:
         device='cuda',
         use_amp=True,
         use_images=False,
+        compile_models=True,
     ):
         """
         Inputs:
@@ -534,6 +710,7 @@ class HierarchicalSACAgent:
         - device: torch device
         - use_amp: use mixed precision on CUDA
         - use_images: whether critics accept image inputs
+        - compile_models: compile actor / skill selector with torch.compile
         """
         self.gamma = gamma
         self.tau = tau
@@ -541,6 +718,7 @@ class HierarchicalSACAgent:
         self.action_dim = action_dim
         self.use_amp = use_amp and device != 'cpu'
         self.use_images = use_images
+        self.amp_dtype = torch.float16
         
         # Determine best dtype
         if self.use_amp:
@@ -561,9 +739,11 @@ class HierarchicalSACAgent:
         self.critic_target = DoubleCritic(obs_dim, action_dim, hidden_sizes, use_images).to(device)
         self.critic_target.load_state_dict(self.critic.state_dict())
         
-        # Compile networks for speed
-        self.actor = torch.compile(self.actor, mode='default')
-        self.skill_selector = torch.compile(self.skill_selector, mode='default')
+        # Compile networks for speed (can consume extra RAM / VRAM on smaller systems)
+        self.compile_models = bool(compile_models)
+        if self.compile_models:
+            self.actor = torch.compile(self.actor, mode='default')
+            self.skill_selector = torch.compile(self.skill_selector, mode='default')
         
         # Optimizers
         self.skill_optimizer = optim.AdamW(self.skill_selector.parameters(), lr=lr, fused=(device != 'cpu'))
@@ -636,13 +816,15 @@ class HierarchicalSACAgent:
         self.prev_action = action
         return action, skill.cpu().numpy()[0]
     
-    def update(self, replay_buffer, batch_size=1024):
+    def update(self, replay_buffer, batch_size=1024, demo_batch=None, bc_weight=0.0):
         """
         Update actor, critics, skill selector, and entropy terms.
 
         Inputs:
         - replay_buffer: GPUReplayBuffer
         - batch_size: number of samples per update
+        - demo_batch: optional dict {'obs','actions'} for BC regularization
+        - bc_weight: scalar weight for BC regularization term
 
         Outputs:
         - metrics dict with losses and alphas (floats)
@@ -685,6 +867,7 @@ class HierarchicalSACAgent:
         self.scaler.step(self.critic_optimizer)
         
         # ---- Actor update ----
+        bc_loss = torch.tensor(0.0, device=self.device)
         with torch.amp.autocast(device_type='cuda', dtype=self.amp_dtype, enabled=self.use_amp):
             if hasattr(torch, "compiler") and hasattr(torch.compiler, "cudagraph_mark_step_begin"):
                 torch.compiler.cudagraph_mark_step_begin()
@@ -696,6 +879,22 @@ class HierarchicalSACAgent:
             q_new = torch.min(q1_new, q2_new)
             
             actor_loss = (self.alpha_action * action_logprob - q_new).mean()
+
+            if demo_batch is not None and bc_weight > 0.0:
+                demo_obs = demo_batch['obs']
+                demo_actions = demo_batch['actions']
+                b = demo_obs.shape[0]
+                k = SkillSelector.NUM_SKILLS
+                # Evaluate all discrete skills, then take the best-matching one per sample.
+                demo_obs_rep = demo_obs.unsqueeze(1).expand(b, k, demo_obs.shape[1]).reshape(b * k, demo_obs.shape[1])
+                demo_skill_rep = torch.arange(k, device=self.device).unsqueeze(0).expand(b, k).reshape(b * k)
+                demo_pred_rep, _ = self.actor(
+                    demo_obs_rep, demo_skill_rep, deterministic=True, with_logprob=False
+                )
+                demo_pred = demo_pred_rep.view(b, k, -1)
+                mse_per_skill = ((demo_pred - demo_actions.unsqueeze(1)) ** 2).mean(dim=-1)
+                bc_loss = mse_per_skill.min(dim=1).values.mean()
+                actor_loss = actor_loss + float(bc_weight) * bc_loss
         
         self.actor_optimizer.zero_grad(set_to_none=True)
         self.scaler.scale(actor_loss).backward()
@@ -745,6 +944,7 @@ class HierarchicalSACAgent:
             'critic_loss': critic_loss.item(),
             'actor_loss': actor_loss.item(),
             'skill_loss': skill_loss.item(),
+            'bc_loss': float(bc_loss.item()),
             'alpha_skill': self.alpha_skill,
             'alpha_action': self.alpha_action,
         }
@@ -777,9 +977,29 @@ class HierarchicalSACAgent:
         - filepath: checkpoint path
         - resume_training: if True, restores optimizers and scalers
         """
+        def _normalize_state_dict_keys(model, src_state_dict):
+            """Handle compiled (<_orig_mod.>) and non-compiled checkpoints."""
+            src_keys = list(src_state_dict.keys())
+            tgt_keys = list(model.state_dict().keys())
+            if not src_keys or not tgt_keys:
+                return src_state_dict
+
+            src_prefixed = all(k.startswith("_orig_mod.") for k in src_keys)
+            tgt_prefixed = all(k.startswith("_orig_mod.") for k in tgt_keys)
+            if src_prefixed == tgt_prefixed:
+                return src_state_dict
+
+            if src_prefixed and not tgt_prefixed:
+                return {k[len("_orig_mod."):]: v for k, v in src_state_dict.items()}
+            return {f"_orig_mod.{k}": v for k, v in src_state_dict.items()}
+
         checkpoint = torch.load(filepath, map_location=self.device, weights_only=False)
-        self.skill_selector.load_state_dict(checkpoint['skill_selector'])
-        self.actor.load_state_dict(checkpoint['actor'])
+        self.skill_selector.load_state_dict(
+            _normalize_state_dict_keys(self.skill_selector, checkpoint['skill_selector'])
+        )
+        self.actor.load_state_dict(
+            _normalize_state_dict_keys(self.actor, checkpoint['actor'])
+        )
         self.critic.load_state_dict(checkpoint['critic'])
         self.critic_target.load_state_dict(checkpoint['critic_target'])
         
@@ -1054,15 +1274,9 @@ class RoboSuiteEnvV2:
         # Phase info is now in observations, so the actor learns phase-specific behavior directly
         skill_bonus = 0.0
         
-        # Determine actual phase for logging
-        if height_above_table > 0.08:
-            actual_phase = 3  # Hold
-        elif height_above_table > 0.01 or (gripper_closed and distance < 0.1):
-            actual_phase = 2  # Lift
-        elif distance < 0.1:
-            actual_phase = 1  # Grasp
-        else:
-            actual_phase = 0  # Reach
+        # Determine actual phase from the same helper used for observation phase
+        # so "detected phase" is consistent everywhere.
+        actual_phase = int(np.argmax(self._compute_phase(obs)))
         
         # Simple skill consistency: small bonus for matching, no penalty
         if skill is not None and skill == actual_phase:
@@ -1245,14 +1459,26 @@ def train(args):
     if args.cuda and device.type == 'cpu':
         print("ERROR: CUDA requested but not available!")
         sys.exit(1)
+
+    args.demo_ratio = float(np.clip(args.demo_ratio, 0.0, 1.0))
+    args.demo_bc_weight = float(max(0.0, args.demo_bc_weight))
+    args.demo_batch_size = int(max(1, args.demo_batch_size))
     
     print(f"Using device: {device}")
+    ram_gb = _system_ram_gb()
+    if ram_gb > 0:
+        print(f"System RAM: {ram_gb:.1f} GiB")
     
     if device.type == 'cuda':
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
         print(f"GPU: {torch.cuda.get_device_name(0)}")
+        vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+        print(f"GPU VRAM: {vram_gb:.1f} GiB")
+        if (vram_gb <= 9.0 and args.num_envs >= 8 and args.batch_size >= 512 and not args.low_mem):
+            print("WARNING: configuration is aggressive for <=9 GiB VRAM laptops.")
+            print("         Consider: --low_mem (or reduce --num_envs/--batch_size/--updates_per_step).")
     
     torch.set_num_threads(max(1, min(8, mp.cpu_count() // args.num_envs)))
     
@@ -1271,20 +1497,23 @@ def train(args):
     env = SubprocVecEnvV2([make_env for _ in range(args.num_envs)])
     
     # Create agent
+    hidden_sizes = tuple(args.hidden)
     agent = HierarchicalSACAgent(
         obs_dim=env.obs_dim,
         action_dim=env.action_dim,
-        hidden_sizes=(512, 512, 256),
+        hidden_sizes=hidden_sizes,
         lr=args.lr,
         gamma=args.gamma,
         tau=args.tau,
         device=device,
-        use_amp=args.cuda,
+        use_amp=(args.cuda and (not args.no_amp)),
         use_images=args.use_camera,
+        compile_models=(not args.no_compile),
     )
     
     # Resume if specified
     start_episode = 1
+    resumed = False
     if args.resume and os.path.exists(args.resume):
         agent.load(args.resume, resume_training=True)
         basename = os.path.basename(args.resume)
@@ -1293,6 +1522,7 @@ def train(args):
                 start_episode = int(basename.split('ep')[1].split('.')[0]) + 1
             except:
                 pass
+        resumed = True
         print(f"Resumed from {args.resume}")
     
     # Create replay buffer
@@ -1303,13 +1533,73 @@ def train(args):
         device=device,
         use_images=args.use_camera,
         image_shape=env.image_shape if args.use_camera else (3, 84, 84),
+        async_copy=(not args.sync_replay),
     )
+    # Approximate replay memory (state tensors only).
+    # columns = obs + action + reward + next_obs + done
+    replay_cols = env.obs_dim + env.action_dim + 1 + env.obs_dim + 1
+    replay_gib = (args.buffer_size * replay_cols * 4) / (1024 ** 3)
+    print(f"  Replay (state tensors) ~ {replay_gib:.2f} GiB on {device}")
+    print(f"  AMP: {not args.no_amp} | compile: {not args.no_compile} | sync_replay: {args.sync_replay}")
+
+    # Optional demo integration: replay prefill + demo mini-batch regularization.
+    demo_batch_buffer = None
+    demo_prefilled_steps = 0
+    demo_skip_warmup = False
+    if args.demo_data:
+        demo_paths = _expand_hdf5_patterns(args.demo_data)
+        if not demo_paths:
+            raise ValueError(f"No demo files matched --demo_data patterns: {args.demo_data}")
+        print(f"Loading demos from {len(demo_paths)} files...")
+        demo_data = load_demo_transitions(demo_paths, env.obs_dim, env.action_dim)
+        if demo_data is None:
+            raise ValueError("Demo loading failed: no compatible transitions were found.")
+
+        meta = demo_data["meta"]
+        print(f"  Demo transitions: {meta['num_steps']} from {meta['num_demos']} demos "
+              f"({meta['num_files']} files, skipped={meta['skipped_demos']})")
+
+        demo_batch_buffer = DemoBatchBuffer(
+            demo_data["obs"], demo_data["actions"], device=device
+        )
+
+        if args.demo_prefill_steps < 0:
+            prefill_target = meta["num_steps"]
+        else:
+            prefill_target = min(args.demo_prefill_steps, meta["num_steps"])
+
+        if prefill_target > 0:
+            select_idx = np.random.permutation(meta["num_steps"])[:prefill_target]
+            for idx in select_idx:
+                replay_buffer.add(
+                    demo_data["obs"][idx],
+                    demo_data["actions"][idx],
+                    float(demo_data["rewards"][idx, 0]),
+                    demo_data["next_obs"][idx],
+                    float(demo_data["dones"][idx, 0]),
+                )
+            if replay_buffer._buffer_ptr > 0:
+                replay_buffer._flush()
+            if device.type == 'cuda':
+                torch.cuda.synchronize()
+            demo_prefilled_steps = int(prefill_target)
+            print(f"  Prefilled replay with {demo_prefilled_steps} demo transitions")
+
+        demo_skip_warmup = bool(args.demo_skip_warmup)
+        del demo_data
     
     # Metrics
     episode_rewards = np.zeros(args.num_envs)
+    episode_max_heights = np.zeros(args.num_envs, dtype=np.float32)
+    episode_success = np.zeros(args.num_envs, dtype=bool)
     all_episode_rewards = deque(maxlen=100)
+    all_episode_max_heights = deque(maxlen=100)
+    all_episode_success = deque(maxlen=100)
     best_avg_reward = -float('inf')
     skill_counts = np.zeros(SkillSelector.NUM_SKILLS)
+    actual_phase_counts = np.zeros(SkillSelector.NUM_SKILLS, dtype=np.int64)
+    skill_match_count = 0
+    skill_match_total = 0
     
     save_dir = os.path.join(ROOT, "checkpoints_v2", datetime.now().strftime("%Y%m%d_%H%M%S"))
     os.makedirs(save_dir, exist_ok=True)
@@ -1319,12 +1609,21 @@ def train(args):
     print("="*70)
     print(f"  Skills: {SkillSelector.SKILL_NAMES}")
     print(f"  Episodes: {args.episodes} | Batch: {args.batch_size}")
+    print(f"  Hidden: {hidden_sizes}")
     print(f"  Save: {save_dir}")
     print("="*70 + "\n")
     
     total_steps = 0
     update_times = deque(maxlen=100)
     train_start = time.time()
+    stop_requested = False
+    avail_ram_gb = _available_ram_gb()
+    gpu_free_gb = None
+    last_metrics = {"bc_loss": 0.0}
+
+    if demo_prefilled_steps > 0 and demo_skip_warmup:
+        total_steps = max(total_steps, args.warmup_steps)
+        print("  Skipping random warmup because replay was prefixed with demos.")
     
     # Reset environments
     if args.use_camera:
@@ -1338,7 +1637,12 @@ def train(args):
         
         while True:
             # Get actions
-            if total_steps < args.warmup_steps:
+            in_random_warmup = (
+                total_steps < args.warmup_steps
+                and (not resumed or args.warmup_on_resume)
+                and not (demo_prefilled_steps > 0 and demo_skip_warmup)
+            )
+            if in_random_warmup:
                 actions = np.random.uniform(-1, 1, (args.num_envs, env.action_dim))
                 skills = np.zeros(args.num_envs, dtype=np.int64)
             else:
@@ -1375,10 +1679,25 @@ def train(args):
                 
                 episode_rewards[i] += rewards[i]  # Track original reward for logging
                 skill_counts[skills[i]] += 1
+                info_i = infos[i] if infos is not None else {}
+                h_i = float(info_i.get('height', 0.0))
+                episode_max_heights[i] = max(episode_max_heights[i], h_i)
+                if h_i >= args.success_height:
+                    episode_success[i] = True
+                phase_i = int(info_i.get('actual_phase', 0))
+                if 0 <= phase_i < len(actual_phase_counts):
+                    actual_phase_counts[phase_i] += 1
+                skill_match_total += 1
+                if int(skills[i]) == phase_i:
+                    skill_match_count += 1
                 
                 if dones[i]:
                     all_episode_rewards.append(episode_rewards[i])
+                    all_episode_max_heights.append(float(episode_max_heights[i]))
+                    all_episode_success.append(float(episode_success[i]))
                     episode_rewards[i] = 0
+                    episode_max_heights[i] = 0.0
+                    episode_success[i] = False
             
             obs = next_obs
             images = next_images
@@ -1388,7 +1707,20 @@ def train(args):
             if total_steps >= args.warmup_steps and replay_buffer.size >= args.batch_size:
                 update_start = time.perf_counter()
                 for _ in range(args.updates_per_step):
-                    metrics = agent.update(replay_buffer, args.batch_size)
+                    demo_batch = None
+                    if (demo_batch_buffer is not None and args.demo_bc_weight > 0.0
+                            and args.demo_ratio > 0.0):
+                        demo_bs = max(1, int(args.batch_size * args.demo_ratio))
+                        if args.demo_batch_size > 0:
+                            demo_bs = min(demo_bs, args.demo_batch_size)
+                        demo_batch = demo_batch_buffer.sample(demo_bs)
+
+                    last_metrics = agent.update(
+                        replay_buffer,
+                        args.batch_size,
+                        demo_batch=demo_batch,
+                        bc_weight=args.demo_bc_weight,
+                    )
                 torch.cuda.synchronize()
                 update_times.append(time.perf_counter() - update_start)
             
@@ -1402,16 +1734,49 @@ def train(args):
             elapsed = time.time() - train_start
             sps = total_steps / elapsed if elapsed > 0 else 0
             avg_update = np.mean(update_times) * 1000 if update_times else 0
+            avail_ram_gb = _available_ram_gb()
+            gpu_free_gb = None
+            if device.type == 'cuda':
+                try:
+                    free_b, total_b = torch.cuda.mem_get_info()
+                    gpu_free_gb = free_b / (1024 ** 3)
+                except Exception:
+                    gpu_free_gb = None
             
             # Skill distribution
             skill_pct = skill_counts / (skill_counts.sum() + 1e-8) * 100
             skill_str = " ".join([f"{n[0]}:{p:.0f}%" for n, p in zip(SkillSelector.SKILL_NAMES, skill_pct)])
+            actual_phase_pct = actual_phase_counts / (actual_phase_counts.sum() + 1e-8) * 100
+            phase_str = " ".join([f"{n[0]}:{p:.0f}%" for n, p in zip(SkillSelector.SKILL_NAMES, actual_phase_pct)])
+            match_pct = 100.0 * skill_match_count / max(skill_match_total, 1)
+            avg_max_h = np.mean(all_episode_max_heights) if all_episode_max_heights else 0.0
+            succ_rate = (np.mean(all_episode_success) * 100.0) if all_episode_success else 0.0
+            bc_str = ""
+            if demo_batch_buffer is not None and args.demo_bc_weight > 0.0:
+                bc_str = f" bc={last_metrics.get('bc_loss', 0.0):.4f}"
             
             print(f"  Ep {episode:5d} | Steps {total_steps:8,} | Reward {avg_reward:7.1f} | "
                   f"α_s {agent.alpha_skill:.3f} α_a {agent.alpha_action:.3f} | "
-                  f"Skills: {skill_str}")
+                  f"Skills(pred): {skill_str} | Phase(actual): {phase_str} | "
+                  f"match={match_pct:.1f}% | "
+                  f"max_h(avg100)={avg_max_h:.3f} succ@{args.success_height:.2f}m={succ_rate:.1f}%{bc_str} | "
+                  f"RAM_avail={avail_ram_gb:.1f}GiB"
+                  + (f" GPU_free={gpu_free_gb:.1f}GiB" if gpu_free_gb is not None else ""))
+
+            # Safety exit before host lock-up.
+            if avail_ram_gb > 0 and avail_ram_gb < args.min_avail_ram_gb:
+                print(f"Stopping early: available RAM {avail_ram_gb:.2f} GiB "
+                      f"< threshold {args.min_avail_ram_gb:.2f} GiB")
+                stop_requested = True
+            if gpu_free_gb is not None and gpu_free_gb < args.min_free_vram_gb:
+                print(f"Stopping early: free VRAM {gpu_free_gb:.2f} GiB "
+                      f"< threshold {args.min_free_vram_gb:.2f} GiB")
+                stop_requested = True
             
             skill_counts[:] = 0  # Reset for next interval
+            actual_phase_counts[:] = 0  # Reset for next interval
+            skill_match_count = 0
+            skill_match_total = 0
             
             if avg_reward > best_avg_reward and episode > start_episode + 50:
                 best_avg_reward = avg_reward
@@ -1419,6 +1784,9 @@ def train(args):
         
         if episode % args.save_freq == 0:
             agent.save(os.path.join(save_dir, f"checkpoint_ep{episode}.pt"))
+
+        if stop_requested:
+            break
     
     agent.save(os.path.join(save_dir, "final_model.pt"))
     env.close()
@@ -1510,7 +1878,7 @@ def evaluate(args):
         else:
             phase[0] = 1.0
         
-        return np.concatenate([base_obs, phase]).astype(np.float32), distance, height
+        return np.concatenate([base_obs, phase]).astype(np.float32), distance, height, int(np.argmax(phase))
     
     def randomize_cube():
         if not args.domain_rand:
@@ -1527,16 +1895,19 @@ def evaluate(args):
     
     # Calculate obs_dim
     test_obs = env.reset()
-    obs, _, _ = process_obs(test_obs)
+    obs, _, _, _ = process_obs(test_obs)
     obs_dim = len(obs)
     
     # Create agent and load weights
+    hidden_sizes = tuple(args.hidden)
     agent = HierarchicalSACAgent(
         obs_dim=obs_dim,
         action_dim=env.action_dim,
+        hidden_sizes=hidden_sizes,
         device=device,
         use_amp=False,
         use_images=False,  # We're not using camera obs for policy, just visualization
+        compile_models=(not args.no_compile),
     )
     agent.load(args.eval)
     
@@ -1557,19 +1928,26 @@ def evaluate(args):
         randomize_cube()
         raw_obs = env._get_observations()
         
-        obs, distance, height = process_obs(raw_obs)
+        obs, distance, height, actual_phase = process_obs(raw_obs)
+        max_height = height
         agent.reset()
         episode_reward = 0
         done = False
         skill_seq = []
+        actual_phase_seq = []
+        skill_match = 0
         step_count = 0
         
         while not done:
             action, skill = agent.get_action(obs, deterministic=True)
             skill_seq.append(skill)
+            actual_phase_seq.append(actual_phase)
+            if int(skill) == int(actual_phase):
+                skill_match += 1
             
             raw_obs, reward, done, info = env.step(action)
-            obs, distance, height = process_obs(raw_obs)
+            obs, distance, height, actual_phase = process_obs(raw_obs)
+            max_height = max(max_height, height)
             
             episode_reward += reward
             step_count += 1
@@ -1600,8 +1978,15 @@ def evaluate(args):
         from collections import Counter
         skill_counts = Counter([SkillSelector.SKILL_NAMES[s] for s in skill_seq])
         skill_str = ", ".join([f"{k}: {v}" for k, v in skill_counts.most_common()])
+        phase_counts = Counter([SkillSelector.SKILL_NAMES[p] for p in actual_phase_seq])
+        phase_str = ", ".join([f"{k}: {v}" for k, v in phase_counts.most_common()])
+        success = max_height >= args.success_height
+        status = "SUCCESS" if success else "FAIL"
+        match_pct = 100.0 * skill_match / max(len(skill_seq), 1)
         
-        print(f"  Episode {episode+1}: Reward={episode_reward:.1f} | Height={height:.3f}m | Skills: {skill_str}")
+        print(f"  Episode {episode+1}: {status} | Reward={episode_reward:.1f} | "
+              f"Height(final={height:.3f}m, max={max_height:.3f}m) | "
+              f"Skills(pred): {skill_str} | Phase(actual): {phase_str} | match={match_pct:.1f}%")
     
     if show_gripper_cam:
         cv2.destroyAllWindows()
@@ -1636,11 +2021,41 @@ if __name__ == "__main__":
     train_args.add_argument('--episodes', type=int, default=2000, help='Training episodes')
     train_args.add_argument('--buffer_size', type=int, default=1_000_000, help='Buffer size')
     train_args.add_argument('--batch_size', type=int, default=1024, help='Batch size')
+    train_args.add_argument('--hidden', type=int, nargs='+', default=[512, 512, 256],
+                            help='Actor / critic hidden sizes')
     train_args.add_argument('--lr', type=float, default=3e-4, help='Learning rate')
     train_args.add_argument('--gamma', type=float, default=0.99, help='Discount')
     train_args.add_argument('--tau', type=float, default=0.005, help='Soft update')
     train_args.add_argument('--warmup_steps', type=int, default=5000, help='Warmup')
+    train_args.add_argument('--warmup_on_resume', action='store_true',
+                            help='Keep random warmup even when --resume is provided')
     train_args.add_argument('--updates_per_step', type=int, default=8, help='Updates per step')
+    train_args.add_argument('--demo_data', type=str, nargs='*', default=[],
+                            help='Demo HDF5 files / globs for replay prefill + BC regularization')
+    train_args.add_argument('--demo_prefill_steps', type=int, default=-1,
+                            help='How many demo transitions to prefill into replay (-1 = all)')
+    train_args.add_argument('--demo_ratio', type=float, default=0.25,
+                            help='Fraction of batch size to use for demo BC minibatch')
+    train_args.add_argument('--demo_batch_size', type=int, default=256,
+                            help='Cap for demo BC minibatch size per update')
+    train_args.add_argument('--demo_bc_weight', type=float, default=0.1,
+                            help='Weight for demo behavior-cloning regularization term')
+    train_args.add_argument('--demo_skip_warmup', action='store_true',
+                            help='Skip random warmup when replay was prefilled with demos')
+    train_args.add_argument('--low_mem', action='store_true',
+                            help='Safer settings for low-memory GPUs/laptops')
+    train_args.add_argument('--no_compile', action='store_true',
+                            help='Disable torch.compile for lower peak memory / startup cost')
+    train_args.add_argument('--no_amp', action='store_true',
+                            help='Disable mixed precision for maximum stability')
+    train_args.add_argument('--sync_replay', action='store_true',
+                            help='Disable async replay H2D copies (safer on unstable laptops)')
+    train_args.add_argument('--min_avail_ram_gb', type=float, default=1.0,
+                            help='Early-stop guard when available system RAM drops below this')
+    train_args.add_argument('--min_free_vram_gb', type=float, default=0.4,
+                            help='Early-stop guard when free VRAM drops below this')
+    train_args.add_argument('--success_height', type=float, default=0.10,
+                            help='Height above table (m) considered a successful lift')
     
     # Logging
     log_args = parser.add_argument_group("Logging")
@@ -1654,6 +2069,7 @@ if __name__ == "__main__":
     hw_args.add_argument('--num_envs', type=int, default=16, help='Parallel envs')
     
     args = parser.parse_args()
+    _apply_low_memory_profile(args)
     
     if args.eval:
         evaluate(args)

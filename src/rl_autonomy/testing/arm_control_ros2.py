@@ -47,6 +47,22 @@ except ImportError:
     print("[WARN] rover_msgs not found, using Float64MultiArray on /arm/sim_command")
 
 
+# Joint names matching the URDF / SRDF (same order as MuJoCo actuators)
+URDF_JOINT_NAMES = [
+    'shoulder_joint',
+    'link_1_joint',
+    'link1_link2',
+    'a4_rotation',
+    'a5_rotation',
+    'a6_rotation',
+]
+
+# Firmware direction multipliers applied by joy_arm_control's trajectory_callback.
+# MuJoCo uses the same sign convention as the URDF, so we must UNDO these flips
+# when converting from firmware commands back to sim commands.
+# From joy_arm_control.h:  AXIS_DIR = {1, 1, 1, 1, -1, -1}
+FIRMWARE_AXIS_DIR = np.array([1, 1, 1, 1, -1, -1], dtype=float)
+
 class RoboSuiteBridge(Node):
     """ROS2 node that bridges commands to RoboSuite simulation."""
     
@@ -88,6 +104,8 @@ class RoboSuiteBridge(Node):
         
         # Publisher for joint feedback
         self.joint_pub = self.create_publisher(JointState, '/arm/joint_states', 10)
+        # Also publish on /joint_states so MoveIt Servo can close the loop
+        self.joint_states_pub = self.create_publisher(JointState, '/joint_states', 10)
         
         if HAS_ROVER_MSGS:
             self.feedback_pub = self.create_publisher(ArmCommand, '/arm/feedback', 10)
@@ -95,19 +113,33 @@ class RoboSuiteBridge(Node):
         self.get_logger().info('RoboSuite bridge node started')
     
     def arm_command_callback(self, msg):
-        """Handle ArmCommand messages from IK stack."""
+        """Handle ArmCommand messages from IK stack.
+
+        joy_arm_control's trajectory_callback converts MoveIt Servo output:
+            vel_firmware = vel_rad * (180/pi) * AXIS_DIR[axis]
+        So to recover the URDF-convention rad/s that MuJoCo expects:
+            vel_urdf = vel_firmware * (pi/180) / AXIS_DIR
+                     = vel_firmware * (pi/180) * AXIS_DIR   (AXIS_DIR is ±1)
+        """
         with self.lock:
-            # Extract velocities (6 joints)
             if len(msg.velocities) >= self.num_joints:
-                self.joint_velocities = np.array(msg.velocities[:self.num_joints])
+                raw = np.array(msg.velocities[:self.num_joints])
+                # Undo firmware direction flip, then deg/s → rad/s
+                self.joint_velocities = np.deg2rad(raw) * FIRMWARE_AXIS_DIR
             # Gripper command
             self.gripper_cmd = msg.end_effector if hasattr(msg, 'end_effector') else 0.0
     
     def sim_command_callback(self, msg):
-        """Handle Float64MultiArray messages (from sim_helper_node)."""
+        """Handle Float64MultiArray messages (from sim_helper_node).
+
+        sim_helper_node just relays the ArmCommand velocities as-is,
+        so these are still in deg/s with firmware direction flips.
+        Same conversion as arm_command_callback.
+        """
         with self.lock:
             if len(msg.data) >= self.num_joints:
-                self.joint_velocities = np.array(msg.data[:self.num_joints])
+                raw = np.array(msg.data[:self.num_joints])
+                self.joint_velocities = np.deg2rad(raw) * FIRMWARE_AXIS_DIR
     
     def gripper_callback(self, msg):
         """Handle gripper command."""
@@ -121,13 +153,15 @@ class RoboSuiteBridge(Node):
     
     def publish_feedback(self, joint_positions, joint_velocities, eef_pos):
         """Publish joint state feedback to ROS2."""
-        # JointState message
+        # JointState message with real URDF joint names
         js_msg = JointState()
         js_msg.header.stamp = self.get_clock().now().to_msg()
-        js_msg.name = [f'joint_{i}' for i in range(len(joint_positions))]
+        js_msg.name = URDF_JOINT_NAMES[:len(joint_positions)]
         js_msg.position = joint_positions.tolist()
         js_msg.velocity = joint_velocities.tolist() if joint_velocities is not None else []
         self.joint_pub.publish(js_msg)
+        # Mirror on /joint_states for MoveIt Servo feedback loop
+        self.joint_states_pub.publish(js_msg)
         
         # ArmCommand feedback
         if HAS_ROVER_MSGS:
@@ -142,8 +176,8 @@ def main():
     parser.add_argument("--environment", type=str, default="Lift")
     parser.add_argument("--robots", nargs="+", type=str, default=["Rover2026"])
     parser.add_argument("--max_fr", default=20, type=int, help="Max frame rate")
-    parser.add_argument("--velocity-scale", type=float, default=0.1, 
-                        help="Scale factor for joint velocities")
+    parser.add_argument("--velocity-scale", type=float, default=1.0, 
+                        help="Scale factor for joint velocities (1.0 = match MoveIt Servo output)")
     args = parser.parse_args()
 
     # Initialize ROS2

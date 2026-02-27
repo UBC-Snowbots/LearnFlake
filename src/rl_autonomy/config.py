@@ -6,7 +6,7 @@ class Config:
     
     # === Mode ===
     MODE = "eval"  # "train", "eval", or "resume"
-    EVAL_CHECKPOINT = "testing/checkpoints_v3/20260206_200255/best_model.pt"  # Path to checkpoint for eval (e.g., "checkpoints_v3/20260206/best_model.pt")
+    EVAL_CHECKPOINT = "checkpoints/20260215_211751/best_model.pt"  # Path to checkpoint for eval (e.g., "checkpoints_v3/20260206/best_model.pt")
     RESUME_CHECKPOINT = None  # Path to checkpoint to resume training from
     
     # === Hardware ===
