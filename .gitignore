@@ -78,3 +78,5 @@ AGENTS.md
 **/.claude/
 
 robo_imitate-main.zip
+
+src/external_pkgs
