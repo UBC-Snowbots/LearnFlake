@@ -4,49 +4,83 @@ import numpy as np
 import multiprocessing as mp
 import robosuite as suite
 from robosuite.controllers.composite.composite_controller_factory import refactor_composite_controller_config
+from robosuite.utils.placement_samplers import UniformRandomSampler
 
 # Path setup for RoboSuite if not installed as package
 ROOT = os.path.dirname(os.path.abspath(__file__))
-# ../external_pkgs/RoboSuite relative to src/rl_autonomy
 ROBO_PATH = os.path.join(ROOT, "..", "external_pkgs", "RoboSuite")
 if os.path.exists(ROBO_PATH) and ROBO_PATH not in sys.path:
     sys.path.insert(0, ROBO_PATH)
 
 
+# ============================================================================
+# Curriculum Ranges
+# ============================================================================
+# Cube placement ranges per curriculum level (x_range, y_range)
+CURRICULUM_RANGES = {
+    0: ((-0.08, 0.08), (-0.08, 0.08)),   # Easy: near centre
+    1: ((-0.15, 0.15), (-0.15, 0.15)),   # Medium: wider spread
+    2: ((-0.25, 0.25), (-0.20, 0.20)),   # Hard: full table
+}
+
+PERTURBATION_STRENGTH = {0: 0.02, 1: 0.04, 2: 0.06}
+FORCED_DROP_PROB      = {0: 0.0,  1: 0.005, 2: 0.01}
+
+# Target height for the lift task (metres above the table).
+# This is the "setpoint" analogous to an impedance controller's reference.
+# The reward peaks here; going higher yields diminishing / negative returns.
+TARGET_LIFT_HEIGHT = 0.15
+
+# Tolerance band (σ of the Gaussian bell-curve reward).
+# Within ±1σ the agent receives >60 % of peak reward — this is the
+# "compliant region" where position maintenance is considered successful.
+LIFT_HEIGHT_SIGMA  = 0.04
+
+
 class RoboSuiteEnvV3:
     """
-    Enhanced environment with:
-    - Wide domain randomization (full table)
-    - Drop detection & recovery rewards
-    - Mid-episode perturbations
-    - 6-phase encoding (includes Recovery & Return)
+    Enhanced Lift wrapper with curriculum-aware domain randomization.
+
+    Key features:
+      - Cube placement randomization via RoboSuite's native placement_initializer
+        (guarantees the cube actually spawns at the sampled location).
+      - Drop detection, recovery rewards, and mid-episode perturbations.
+      - 5-phase encoding: Reach, Grasp, Lift, Hold, Recover.
     """
-    
+
     CAMERA_NAME = "robot0_eye_in_hand"
-    
+
     def __init__(
         self,
         render=False,
         domain_randomization=True,
-        perturbation_prob=0.02,  # 2% chance per step
-        wide_randomization=True,  # Full table coverage
-        curriculum_level=0,  # 0=easy, 1=medium, 2=hard
+        perturbation_prob=0.02,
+        wide_randomization=True,
+        curriculum_level=0,
     ):
-        arm_controller_config = suite.load_part_controller_config(default_controller="JOINT_VELOCITY")
-        controller_config = refactor_composite_controller_config(arm_controller_config, "Rover2026", ["right"])
-        
         self.domain_randomization = domain_randomization
         self.perturbation_prob = perturbation_prob
         self.wide_randomization = wide_randomization
         self.curriculum_level = curriculum_level
-        
-        # Longer horizon for recovery practice
         self.horizon = 400
-        
-        # NEW: Forced drop probability (Curriculum based)
-        # We will intentionally open gripper mid-air to force recovery practice
-        self.forced_drop_prob = 0.0  # Set in update_randomization_bounds
-        
+
+        # Forced-drop probability (set by curriculum)
+        self.forced_drop_prob = FORCED_DROP_PROB.get(curriculum_level, 0.0)
+        self.perturbation_strength = PERTURBATION_STRENGTH.get(curriculum_level, 0.02)
+
+        # Build controller
+        arm_controller_config = suite.load_part_controller_config(
+            default_controller="JOINT_VELOCITY"
+        )
+        controller_config = refactor_composite_controller_config(
+            arm_controller_config, "Rover2026", ["right"]
+        )
+
+        # Build a placement initializer with the desired cube range.
+        # RoboSuite's Lift._reset_internal() will call placement_initializer.sample()
+        # on every reset, so the cube *actually* ends up at the sampled position.
+        placement_init = self._build_placement_initializer()
+
         self.env = suite.make(
             env_name="Lift",
             robots=["Rover2026"],
@@ -58,13 +92,11 @@ class RoboSuiteEnvV3:
             control_freq=20,
             horizon=self.horizon,
             reward_shaping=True,
+            placement_initializer=placement_init,
         )
-        
+
         self.render_enabled = render
         self._setup_spaces()
-        
-        # Domain randomization bounds (curriculum-based)
-        self._update_randomization_bounds()
         
         # Episode state tracking
         self._was_lifted = False
@@ -73,51 +105,74 @@ class RoboSuiteEnvV3:
         self._max_height_achieved = 0.0
         self._initial_cube_pos = None
         self._steps_since_drop = 0
-        
-        # NEW: Enhanced drop/recovery tracking
-        self._drop_count = 0  # Total drops this episode
-        self._failed_recoveries = 0  # Failed recovery attempts
-        self._recovery_deadline = 80  # Steps allowed to recover before penalty
-        self._last_lift_height = 0.0  # Height before drop (for penalty scaling)
-        self._drop_penalty_applied = False  # Track if we already penalized this drop
-        self._holding_cube = False  # Currently holding the cube
-        
-        # Smoothness tracking for fluid motion rewards
+
+        # Drop / recovery tracking
+        self._drop_count = 0
+        self._failed_recoveries = 0
+        self._recovery_deadline = 80
+        self._last_lift_height = 0.0
+        self._drop_penalty_applied = False
+        self._holding_cube = False
+
+        # One-time milestone flags (prevent per-step success_reward explosion)
+        self._milestone_04 = False   # 4 cm
+        self._milestone_08 = False   # 8 cm
+        self._milestone_target = False  # TARGET_LIFT_HEIGHT
+
+        # Smoothness tracking
         self._prev_action = None
         self._prev_joint_vel = None
         self._prev_eef_pos = None
-    
-    def _update_randomization_bounds(self):
-        """Update randomization based on curriculum level."""
-        if self.curriculum_level == 0:
-            # Easy: small range
-            self.cube_x_range = (-0.08, 0.08)
-            self.cube_y_range = (-0.08, 0.08)
-            self.perturbation_strength = 0.02
-            self.forced_drop_prob = 0.0  # No forced drops yet
-        elif self.curriculum_level == 1:
-            # Medium: wider range
-            self.cube_x_range = (-0.15, 0.15)
-            self.cube_y_range = (-0.15, 0.15)
-            self.perturbation_strength = 0.04
-            self.forced_drop_prob = 0.005  # 0.5% chance per step to force drop if holding
+
+    # ------------------------------------------------------------------
+    # Placement initializer helpers
+    # ------------------------------------------------------------------
+    def _build_placement_initializer(self):
+        """Create a UniformRandomSampler with curriculum-appropriate ranges.
+
+        When domain_randomization is disabled, the cube spawns at a fixed
+        position (x_range and y_range are both [0, 0]).
+        """
+        if self.domain_randomization:
+            x_range, y_range = CURRICULUM_RANGES.get(
+                self.curriculum_level, CURRICULUM_RANGES[2]
+            )
         else:
-            # Hard: full table
-            self.cube_x_range = (-0.25, 0.25)
-            self.cube_y_range = (-0.20, 0.20)
-            self.perturbation_strength = 0.06
-            self.forced_drop_prob = 0.01  # 1% chance per step to force drop if holding
+            x_range = (0.0, 0.0)
+            y_range = (0.0, 0.0)
+
+        return UniformRandomSampler(
+            name="ObjectSampler",
+            x_range=list(x_range),
+            y_range=list(y_range),
+            rotation=None,
+            ensure_object_boundary_in_range=False,
+            ensure_valid_placement=True,
+            reference_pos=self.env.table_offset if hasattr(self, 'env') else (0, 0, 0.8),
+            z_offset=0.01,
+        )
+
+    def _rebuild_placement_initializer(self):
+        """Rebuild and hot-swap the placement initializer on a live env.
+
+        Called when the curriculum level changes so that subsequent resets
+        sample cube positions from the updated range.
+        """
+        new_sampler = self._build_placement_initializer()
+        # Re-register the cube object with the new sampler
+        new_sampler.reset()
+        new_sampler.add_objects(self.env.cube)
+        self.env.placement_initializer = new_sampler
     
     def set_curriculum_level(self, level):
-        """Update curriculum difficulty."""
+        """Update curriculum difficulty and rebuild the placement initializer."""
         self.curriculum_level = min(2, max(0, level))
-        self._update_randomization_bounds()
+        self.forced_drop_prob = FORCED_DROP_PROB.get(self.curriculum_level, 0.01)
+        self.perturbation_strength = PERTURBATION_STRENGTH.get(self.curriculum_level, 0.06)
+        self._rebuild_placement_initializer()
     
     def _setup_spaces(self):
         obs = self.env.reset()
-        
-        # Store initial joint pose for "return home" skill
-        self._initial_joint_pos = obs['robot0_joint_pos'].copy()
         
         self.obs_keys = [
             'robot0_joint_pos',
@@ -129,9 +184,9 @@ class RoboSuiteEnvV3:
             'gripper_to_cube_pos',
         ]
         
-        # +6 for phase one-hot encoding (reach, grasp, lift, hold, RECOVER, RETURN)
+        # +5 for phase one-hot encoding (reach, grasp, lift, hold, recover)
         # +3 for extra state info (was_lifted, drop_detected, recovery_progress)
-        self.obs_dim = sum(len(np.array(obs[key]).flatten()) for key in self.obs_keys if key in obs) + 6 + 3
+        self.obs_dim = sum(len(np.array(obs[key]).flatten()) for key in self.obs_keys if key in obs) + 5 + 3
         self.action_dim = self.env.action_dim
     
     def _compute_phase(self, obs):
@@ -190,17 +245,14 @@ class RoboSuiteEnvV3:
             self._was_lifted = True
         
         # =================================================================
-        # Phase determination
+        # Phase determination (5 phases: Reach, Grasp, Lift, Hold, Recover)
         # =================================================================
-        phase = np.zeros(6, dtype=np.float32)
+        phase = np.zeros(5, dtype=np.float32)
         
         if self._drop_detected:
             phase[4] = 1.0  # RECOVER phase - highest priority!
-        # If successfully lifted high enough, start RETURN phase (NEW!)
-        elif height_above_table > 0.20 and currently_holding:
-            phase[5] = 1.0  # RETURN phase - bring it home!
-        elif height_above_table > 0.08 and currently_holding:
-            phase[3] = 1.0  # Hold (stabilize before return)
+        elif height_above_table > TARGET_LIFT_HEIGHT * 0.5 and currently_holding:
+            phase[3] = 1.0  # Hold (maintain at target height)
         elif height_above_table > 0.01 or (gripper_closed and distance < 0.1):
             phase[2] = 1.0  # Lift
         elif distance < 0.12:
@@ -228,73 +280,68 @@ class RoboSuiteEnvV3:
         ], dtype=np.float32)
         
         return np.concatenate([base_obs, phase, extra_state]).astype(np.float32)
-    
-    def _randomize_cube_position(self):
-        """Randomize cube position."""
-        if not self.domain_randomization:
-            return
-        
-        try:
-            cube_body_id = self.env.sim.model.body_name2id('cube_main')
-            base_pos = self.env.sim.model.body_pos[cube_body_id].copy()
-            
-            if self.wide_randomization:
-                base_pos[0] += np.random.uniform(*self.cube_x_range)
-                base_pos[1] += np.random.uniform(*self.cube_y_range)
-            else:
-                base_pos[0] += np.random.uniform(-0.1, 0.1)
-                base_pos[1] += np.random.uniform(-0.1, 0.1)
-            
-            self.env.sim.model.body_pos[cube_body_id] = base_pos
-            self.env.sim.forward()
-            self._initial_cube_pos = base_pos.copy()
-        except Exception:
-            pass
-    
+
     def _apply_perturbation(self):
-        """Apply random perturbation to cube (simulates accidental bump)."""
+        """Apply a random velocity impulse to the cube mid-episode.
+
+        Uses MuJoCo's qvel (generalised velocity) to give the cube a
+        physical push rather than teleporting it, so the physics engine
+        handles the resulting motion naturally.
+        """
         if np.random.random() > self.perturbation_prob:
             return False
-        
+
         try:
-            cube_body_id = self.env.sim.model.body_name2id('cube_main')
-            # Apply random velocity to cube
-            cube_joint_id = self.env.sim.model.body_jntadr[cube_body_id]
-            if cube_joint_id >= 0:
-                # Random velocity impulse
-                vel = np.random.uniform(-self.perturbation_strength, self.perturbation_strength, 3)
-                # This is a simplification - actual perturbation would need qvel modification
-                # For now, just note that perturbation happened
-                return True
+            # The cube has a free joint — its qvel entries are
+            # [vx, vy, vz, wx, wy, wz] (linear + angular velocity).
+            cube_joint_name = self.env.cube.joints[0]
+            joint_id = self.env.sim.model.joint_name2id(cube_joint_name)
+            qvel_addr = self.env.sim.model.jnt_dofadr[joint_id]
+
+            impulse = np.random.uniform(
+                -self.perturbation_strength, self.perturbation_strength, size=3
+            )
+            self.env.sim.data.qvel[qvel_addr:qvel_addr + 3] += impulse
+            return True
         except Exception:
-            pass
-        return False
+            return False
     
     def reset(self):
+        """Reset the environment.
+
+        RoboSuite's internal reset already calls placement_initializer.sample()
+        which places the cube at a random position within the curriculum range.
+        No additional cube-teleporting is needed.
+        """
         obs = self.env.reset()
-        
+
         # Reset episode state
         self._was_lifted = False
         self._drop_detected = False
         self._recovery_count = 0
         self._max_height_achieved = 0.0
         self._steps_since_drop = 0
-        
-        # Reset NEW enhanced tracking
         self._drop_count = 0
         self._failed_recoveries = 0
         self._last_lift_height = 0.0
         self._drop_penalty_applied = False
         self._holding_cube = False
-        
+
+        # Reset milestone flags
+        self._milestone_04 = False
+        self._milestone_08 = False
+        self._milestone_target = False
+
         # Reset smoothness tracking
         self._prev_action = None
         self._prev_joint_vel = None
         self._prev_eef_pos = None
-        
-        self._randomize_cube_position()
-        obs = self.env._get_observations()
-        
+
+        # Record where the cube actually spawned (for logging / debugging)
+        cube_pos = obs.get('cube_pos', None)
+        if cube_pos is not None:
+            self._initial_cube_pos = np.array(cube_pos).copy()
+
         return self._process_obs(obs)
     
     def step(self, action, skill=None):
@@ -340,31 +387,63 @@ class RoboSuiteEnvV3:
         # Phase 1: REACH
         reach_reward = 5.0 * np.exp(-5.0 * distance)
         
-        # Phase 2: GRASP
+        # Phase 2: GRASP — reward for getting close and closing gripper.
+        # Keep moderate so it doesn't become a local optimum vs lifting.
+        # At max (~40/step) over 400 steps = 16K, which is less than
+        # lift+success (~30K at target + 1550 milestone).
         grasp_reward = 0.0
         if distance < 0.15:
-            grasp_reward = 10.0 * (1.0 - distance / 0.15)
+            grasp_reward = 8.0 * (1.0 - distance / 0.15)
             if distance < 0.05:
-                grasp_reward += 15.0
+                grasp_reward += 10.0
             if gripper_closed and distance < 0.08:
-                grasp_reward += 30.0
+                grasp_reward += 20.0
         
-        # Phase 3: LIFT
+        # Phase 3: LIFT — bell-curve reward centred on TARGET_LIFT_HEIGHT
+        # ────────────────────────────────────────────────────────────────
+        # Analogous to an impedance controller's setpoint: the reward
+        # defines WHERE the cube should be, not HOW to hold it there.
+        # The JointVelocityController's PID loop naturally produces
+        # braking torques when the agent outputs zero-velocity commands,
+        # so we don't need to explicitly reward "being still".
+        #
+        # Below the target: monotonically increasing (agent is encouraged
+        #   to lift higher).  Steeper near the target to pull it up.
+        # At the target: moderate per-step reward (not overwhelming).
+        # Above the target: Gaussian roll-off.
+        #
+        # IMPORTANT: Per-step rewards during Hold must stay moderate
+        # (~80-100/step) or they dominate Q-values and cause skill collapse.
         lift_reward = 0.0
         if gripper_closed and distance < 0.1:
             if height_above_table > 0:
-                lift_reward = 100.0 * height_above_table
-                lift_reward += 500.0 * (height_above_table ** 2)
-                lift_reward += 50.0
+                # --- Below target: quadratic ramp (steepens near target) ---
+                if height_above_table <= TARGET_LIFT_HEIGHT:
+                    progress = height_above_table / TARGET_LIFT_HEIGHT
+                    # Ramp: 20 (initial contact) + up to 80 (at target) = 100 peak
+                    lift_reward = 20.0 + 80.0 * (progress ** 1.5)
+                else:
+                    # --- Above target: Gaussian tolerance band ---
+                    overshoot = height_above_table - TARGET_LIFT_HEIGHT
+                    bell = np.exp(-0.5 * (overshoot / LIFT_HEIGHT_SIGMA) ** 2)
+                    # Peak is 100 at exactly TARGET_LIFT_HEIGHT, rolls off above
+                    lift_reward = 100.0 * bell
         
-        # Phase 4: SUCCESS
+        # Phase 4: SUCCESS milestones — ONE-TIME sparse bonuses.
+        # These fire once per episode when the height is first reached.
+        # Without this, the agent gets 1000/step during Hold → 300K total
+        # → massive Q-value imbalance → skill collapse.
         success_reward = 0.0
-        if height_above_table > 0.05:
-            success_reward = 200.0
-        if height_above_table > 0.1:
-            success_reward = 500.0
-        if height_above_table > 0.15:
-            success_reward = 1000.0
+        if gripper_closed and distance < 0.1:
+            if height_above_table > 0.04 and not self._milestone_04:
+                success_reward += 150.0
+                self._milestone_04 = True
+            if height_above_table > 0.08 and not self._milestone_08:
+                success_reward += 400.0
+                self._milestone_08 = True
+            if height_above_table > TARGET_LIFT_HEIGHT - 0.02 and not self._milestone_target:
+                success_reward += 1000.0
+                self._milestone_target = True
         
         # Phase 5: RECOVERY - STRONG incentives to pick up dropped cube!
         recovery_reward = 0.0
@@ -423,171 +502,115 @@ class RoboSuiteEnvV3:
             if not forced_drop_event:
                 drop_penalty -= 30.0 * self._drop_count
         
-        # Phase 6: RETURN HOME (NEW!)
-        # Reward for returning joints to initial state while holding cube
-        return_reward = 0.0
+        # Compute phase ONCE and reuse (avoid repeated _compute_phase calls)
         phase, _, _, _ = self._compute_phase(obs)
         actual_phase = np.argmax(phase)
-        if actual_phase == 5:  # RETURN phase
-            # Calculate joint error relative to initial pose
-            current_joints = obs.get('robot0_joint_pos', np.zeros(7))
-            # Only care about first 4 joints (shoulder/elbow) for coarse return
-            joint_error = np.linalg.norm(current_joints[:4] - self._initial_joint_pos[:4])
-            
-            # Continuous reward for getting closer to home
-            if joint_error < 0.5:
-                return_reward = 20.0 * (1.0 - joint_error / 0.5)
-            
-            # Bonus for being home
-            if joint_error < 0.2:
-                return_reward += 50.0
-            
-            # Massive bonus for STAYING home
-            if joint_error < 0.1:
-                return_reward += 100.0
-        
-        # Skill bonus
-        skill_bonus = 0.0
-        phase, _, _, _ = self._compute_phase(obs)
-        actual_phase = np.argmax(phase)
-        if skill is not None and skill == actual_phase:
-            skill_bonus = 3.0
-        
+
         # =================================================================
-        # SMOOTHNESS REWARDS - Encourage fluid, natural motion
+        # POSITION MAINTENANCE — impedance-style setpoint tracking
         # =================================================================
-        smoothness_reward = 0.0
-        
-        # Get current velocities and positions
+        # Instead of rewarding "stay still" (which fights the controller's
+        # job), we reward the OUTCOME: the cube staying near the target
+        # height.  This is what impedance control does — define a reference
+        # position and let the low-level controller handle stiffness /
+        # damping.  The JointVelocityController's PID + gravity comp
+        # naturally holds the arm when the agent outputs near-zero commands,
+        # so the agent just needs a reason to keep the cube at the target
+        # rather than keep climbing.
+        position_maintenance_reward = 0.0
         joint_vel = obs.get('robot0_joint_vel', np.zeros(7))
         eef_pos = obs.get('robot0_eef_pos', np.zeros(3))
+        vel_magnitude = np.linalg.norm(joint_vel)
+        action_magnitude = np.linalg.norm(action[:6])  # Exclude gripper
+
+        task_achieved = (gripper_closed and distance < 0.1
+                         and height_above_table > 0.05)
+
+        if task_achieved:
+            # How close is the cube to the target height?
+            height_error = abs(height_above_table - TARGET_LIFT_HEIGHT)
+            # Gaussian reward: peaks at target, decays away from it
+            position_maintenance_reward = 30.0 * np.exp(
+                -0.5 * (height_error / LIFT_HEIGHT_SIGMA) ** 2
+            )
+            # Small additional bonus for being very close (within 1 cm)
+            if height_error < 0.01:
+                position_maintenance_reward += 10.0
+
+        # With the bell-curve lift reward, the Hold phase no longer needs
+        # a special cap — the reward naturally plateaus at TARGET_LIFT_HEIGHT.
         
-        # 1. Action smoothness: penalize sudden action changes (jerk in command space)
-        action_smoothness = 0.0
+        # Skill bonus — must be large enough relative to other rewards
+        # to give the skill selector a meaningful gradient signal.
+        # (Reuses `phase` and `actual_phase` computed above.)
+        skill_bonus = 0.0
+        if skill is not None:
+            if skill == actual_phase:
+                skill_bonus = 25.0   # Correct skill for this phase
+            else:
+                skill_bonus = -10.0  # Wrong skill — mild penalty
+        
+        # =================================================================
+        # SMOOTHNESS PENALTIES - Penalize jerky, unnatural motion only
+        # =================================================================
+        # No positive bonuses — those incentivize "do nothing" which
+        # competes with "do the task".  We only penalize BAD motion.
+        smoothness_penalty = 0.0
+
+        # Get current velocities and positions
+        eef_pos = obs.get('robot0_eef_pos', np.zeros(3))
+
+        # 1. Penalize sudden action changes (jerk)
         if self._prev_action is not None:
             action_delta = np.linalg.norm(action - self._prev_action)
-            # Reward small changes, penalize large ones
-            # Threshold: delta < 0.3 is smooth, > 0.8 is jerky
-            if action_delta < 0.3:
-                action_smoothness = 2.0 * (1.0 - action_delta / 0.3)  # Bonus up to +2
-            elif action_delta > 0.8:
-                action_smoothness = -3.0 * (action_delta - 0.8)  # Penalty for jerk
-        
-        # 2. Velocity smoothness: penalize sudden velocity changes (acceleration)
-        velocity_smoothness = 0.0
+            if action_delta > 0.8:
+                smoothness_penalty -= 5.0 * (action_delta - 0.8)
+
+        # 2. Penalize sudden acceleration
         if self._prev_joint_vel is not None:
             vel_delta = np.linalg.norm(joint_vel - self._prev_joint_vel)
-            # Smooth acceleration is vel_delta < 0.5
-            if vel_delta < 0.5:
-                velocity_smoothness = 1.5 * (1.0 - vel_delta / 0.5)  # Bonus up to +1.5
-            elif vel_delta > 1.5:
-                velocity_smoothness = -2.0 * (vel_delta - 1.5)  # Penalty for jerky motion
-        
-        # 3. End-effector path smoothness: reward straight-line motion toward goal
-        path_smoothness = 0.0
+            if vel_delta > 1.5:
+                smoothness_penalty -= 4.0 * (vel_delta - 1.5)
+
+        # 3. Penalize erratic high-speed end-effector motion
         if self._prev_eef_pos is not None:
             eef_delta = eef_pos - self._prev_eef_pos
             eef_speed = np.linalg.norm(eef_delta)
-            
-            # During reach phase, reward moving toward cube
-            if actual_phase == 0 and distance > 0.1:  # Reach phase
-                # Direction toward cube
-                to_cube = gripper_to_cube / (np.linalg.norm(gripper_to_cube) + 1e-6)
-                # Direction of motion
-                motion_dir = eef_delta / (eef_speed + 1e-6)
-                # Alignment (dot product): 1.0 = moving straight to cube
-                alignment = np.dot(to_cube, motion_dir)
-                if alignment > 0.5:
-                    path_smoothness = 2.0 * alignment  # Bonus for efficient path
-            
-            # Penalize erratic high-speed motion
-            if eef_speed > 0.05:  # Moving fast
-                path_smoothness -= 0.5 * max(0, eef_speed - 0.05)
-        
-        # 4. Low velocity magnitude bonus (controlled, deliberate motion)
-        vel_magnitude = np.linalg.norm(joint_vel)
-        controlled_motion_bonus = 0.0
-        if vel_magnitude < 1.0:
-            controlled_motion_bonus = 0.5 * (1.0 - vel_magnitude)  # Small bonus for slow control
-        elif vel_magnitude > 3.0:
-            controlled_motion_bonus = -1.0 * (vel_magnitude - 3.0)  # Penalty for flailing
-        
-        smoothness_reward = (
-            action_smoothness + 
-            velocity_smoothness + 
-            path_smoothness + 
-            controlled_motion_bonus
-        )
+            if eef_speed > 0.05:
+                smoothness_penalty -= 2.0 * (eef_speed - 0.05)
+
+        # 4. Penalize excessively high joint velocities
+        if vel_magnitude > 3.0:
+            smoothness_penalty -= 3.0 * (vel_magnitude - 3.0)
         
         # =================================================================
-        # EFFICIENCY REWARDS - Minimal movement, low effort, natural poses
+        # EFFICIENCY PENALTIES - Penalize wasteful motion only
         # =================================================================
-        efficiency_reward = 0.0
-        
-        # Get joint positions for posture analysis
+        efficiency_penalty = 0.0
+
         joint_pos = obs.get('robot0_joint_pos', np.zeros(7))
-        
-        # 1. Minimal joint movement: reward small total joint displacement
-        #    Encourages efficient paths that don't contort unnecessarily
-        joint_movement_reward = 0.0
-        total_joint_movement = np.sum(np.abs(action[:6]))  # Exclude gripper (last action)
-        if total_joint_movement < 1.0:
-            joint_movement_reward = 1.5 * (1.0 - total_joint_movement)  # Bonus for minimal movement
-        elif total_joint_movement > 3.0:
-            joint_movement_reward = -1.0 * (total_joint_movement - 3.0)  # Penalty for excessive movement
-        
-        # 2. Low torque/effort: penalize large action magnitudes (proxy for torque)
-        #    Encourages the arm to work "smarter not harder"
-        effort_penalty = 0.0
-        action_magnitude = np.linalg.norm(action[:6])  # Exclude gripper
-        if action_magnitude < 0.5:
-            effort_penalty = 1.0  # Bonus for low effort
-        elif action_magnitude > 2.0:
-            effort_penalty = -0.5 * (action_magnitude - 2.0)  # Penalty for high effort
-        
-        # 3. Natural pose reward: prefer joint angles near center of range
-        #    Avoids extreme joint positions (contorted poses)
-        #    Assumes joints are normalized to [-1, 1] range
-        pose_reward = 0.0
-        joint_extremity = np.mean(np.abs(joint_pos[:6]))  # How far from center (0)
-        if joint_extremity < 0.5:
-            pose_reward = 1.0 * (1.0 - joint_extremity / 0.5)  # Bonus for centered joints
-        elif joint_extremity > 0.8:
-            pose_reward = -1.5 * (joint_extremity - 0.8)  # Penalty for extreme poses
-        
-        # 4. Joint limit avoidance: strong penalty near joint limits
-        #    Prevents the arm from reaching awkward configurations
-        joint_limit_penalty = 0.0
-        for i, jp in enumerate(joint_pos[:6]):
-            if abs(jp) > 0.9:  # Very close to limit
-                joint_limit_penalty -= 2.0 * (abs(jp) - 0.9)
-            elif abs(jp) > 0.75:  # Approaching limit
-                joint_limit_penalty -= 0.5 * (abs(jp) - 0.75)
-        
-        # 5. Symmetric arm preference: slight bonus for balanced left-right movement
-        #    Encourages more natural, human-like reaching
-        symmetry_bonus = 0.0
-        # ... logic skipped in source ...
-        
-        # 6. Wrist orientation stability: penalize excessive wrist rotation
-        #    Encourages stable end-effector orientation
-        wrist_stability = 0.0
+
+        # 1. Penalize excessive joint movement
+        total_joint_movement = np.sum(np.abs(action[:6]))
+        if total_joint_movement > 3.0:
+            efficiency_penalty -= 3.0 * (total_joint_movement - 3.0)
+
+        # 2. Penalize excessive action magnitude
+        if action_magnitude > 2.0:
+            efficiency_penalty -= 2.0 * (action_magnitude - 2.0)
+
+        # 3. Penalize joint limit approach (safety concern)
+        for jp in joint_pos[:6]:
+            if abs(jp) > 0.9:
+                efficiency_penalty -= 5.0 * (abs(jp) - 0.9)
+            elif abs(jp) > 0.75:
+                efficiency_penalty -= 1.5 * (abs(jp) - 0.75)
+
+        # 4. Penalize extreme wrist motion
         if len(action) >= 6:
-            wrist_actions = action[4:6] if len(action) >= 6 else []
-            if len(wrist_actions) > 0:
-                wrist_movement = np.linalg.norm(wrist_actions)
-                if wrist_movement < 0.3:
-                    wrist_stability = 0.5 * (1.0 - wrist_movement / 0.3)
-                elif wrist_movement > 1.0:
-                    wrist_stability = -0.5 * (wrist_movement - 1.0)
-        
-        efficiency_reward = (
-            joint_movement_reward +
-            effort_penalty +
-            pose_reward +
-            joint_limit_penalty +
-            wrist_stability
-        )
+            wrist_movement = np.linalg.norm(action[4:6])
+            if wrist_movement > 1.0:
+                efficiency_penalty -= 2.0 * (wrist_movement - 1.0)
         
         # Update previous values for next step
         self._prev_action = action.copy()
@@ -604,16 +627,16 @@ class RoboSuiteEnvV3:
             lift_reward + 
             success_reward + 
             recovery_reward + 
-            return_reward +  # Include return reward
             drop_penalty + 
             skill_bonus + 
-            smoothness_reward +
-            efficiency_reward +
+            position_maintenance_reward +
+            smoothness_penalty +
+            efficiency_penalty +
             action_penalty
         )
         
         # Info for logging
-        phase_names = ['reach', 'grasp', 'lift', 'hold', 'recover', 'return']
+        phase_names = ['reach', 'grasp', 'lift', 'hold', 'recover']
         info['phase'] = phase_names[actual_phase]
         info['actual_phase'] = actual_phase
         info['height'] = height_above_table
@@ -622,9 +645,10 @@ class RoboSuiteEnvV3:
         info['drop_detected'] = self._drop_detected
         info['recovery_count'] = self._recovery_count
         info['perturbation'] = perturbation_applied
-        info['forced_drop'] = forced_drop_event  # Log forced drops
-        info['smoothness'] = smoothness_reward
-        info['efficiency'] = efficiency_reward
+        info['forced_drop'] = forced_drop_event
+        info['smoothness'] = smoothness_penalty
+        info['position_maintenance'] = position_maintenance_reward
+        info['efficiency'] = efficiency_penalty
         # NEW: Enhanced drop/recovery tracking for logging
         info['drop_count'] = self._drop_count
         info['failed_recoveries'] = self._failed_recoveries

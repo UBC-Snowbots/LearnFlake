@@ -71,14 +71,22 @@ class GaussianActor(nn.Module):
 
 
 class DoubleCritic(nn.Module):
-    """Twin Q-networks."""
-    def __init__(self, obs_dim, action_dim, hidden_dims=(256, 256, 256)):
+    """Twin Q-networks, conditioned on skill.
+
+    Q(s, a, z) where z is a one-hot skill vector.  Conditioning the
+    critic on the skill lets it learn separate value estimates per skill,
+    which prevents the skill selector from collapsing when one skill
+    dominates Q-values across all states.
+    """
+    def __init__(self, obs_dim, action_dim, num_skills=5, hidden_dims=(256, 256, 256)):
         super().__init__()
-        self.q1 = MLP(obs_dim + action_dim, hidden_dims, 1)
-        self.q2 = MLP(obs_dim + action_dim, hidden_dims, 1)
+        input_dim = obs_dim + action_dim + num_skills
+        self.num_skills = num_skills
+        self.q1 = MLP(input_dim, hidden_dims, 1)
+        self.q2 = MLP(input_dim, hidden_dims, 1)
     
-    def forward(self, obs, action):
-        x = torch.cat([obs, action], dim=-1)
+    def forward(self, obs, action, skill_onehot):
+        x = torch.cat([obs, action, skill_onehot], dim=-1)
         return self.q1(x), self.q2(x)
 
 
@@ -88,16 +96,15 @@ class DoubleCritic(nn.Module):
 
 class SkillSelectorV3(nn.Module):
     """
-    High-level skill selector with 6 skills:
+    High-level skill selector with 5 skills:
     0: Reach   - move gripper to cube
     1: Grasp   - close gripper on cube
     2: Lift    - lift cube upward
-    3: Hold    - maintain lifted position
+    3: Hold    - maintain lifted position at target height
     4: Recover - re-approach after drop
-    5: Return  - return to start pose (NEW!)
     """
-    NUM_SKILLS = 6
-    SKILL_NAMES = ['Reach', 'Grasp', 'Lift', 'Hold', 'Recover', 'Return']
+    NUM_SKILLS = 5
+    SKILL_NAMES = ['Reach', 'Grasp', 'Lift', 'Hold', 'Recover']
     
     def __init__(self, obs_dim, hidden_dims=(256, 256)):
         super().__init__()

@@ -39,10 +39,10 @@ def train_v3(args):
     num_envs = args.num_envs
     env_fns = [lambda: RoboSuiteEnvV3(
         render=False,
-        domain_randomization=True,
-        perturbation_prob=0.02,
+        domain_randomization=args.domain_rand,
+        perturbation_prob=Config.PERTURBATION_PROB,
         wide_randomization=True,
-        curriculum_level=0,  # Start easy
+        curriculum_level=0,  # Start easy, escalated by curriculum schedule
     ) for _ in range(num_envs)]
     
     vec_env = SubprocVecEnvV3(env_fns)
@@ -203,7 +203,8 @@ def train_v3(args):
             avg_drops = np.mean(drop_history) if len(drop_history) > 0 else 0
             avg_failed = np.mean(failed_recovery_history) if len(failed_recovery_history) > 0 else 0
             skill_dist = skill_counts / (skill_counts.sum() +  1e-8) * 100
-            skill_str = " ".join([f"{n[0]}:{d:.0f}%" for n, d in zip(SkillSelectorV3.SKILL_NAMES, skill_dist)])
+            skill_abbrev = ['Re', 'Gr', 'Li', 'Ho', 'Rc']  # Unambiguous 2-char labels
+            skill_str = " ".join([f"{a}:{d:.0f}%" for a, d in zip(skill_abbrev, skill_dist)])
             
             # Show drops and recoveries prominently
             drop_rec_str = f"D:{avg_drops:.1f}/R:{avg_recovery:.1f}"
@@ -238,16 +239,32 @@ def train_v3(args):
 
 
 def evaluate_v3(args):
-    """Evaluate with visualization."""
+    """Evaluate a trained model with visualisation."""
     import cv2
-    
+    from collections import Counter
+
     device = torch.device('cuda' if torch.cuda.is_available() and args.cuda else 'cpu')
-    
-    # Create environment
-    arm_controller_config = suite.load_part_controller_config(default_controller="JOINT_VELOCITY")
-    controller_config = refactor_composite_controller_config(arm_controller_config, "Rover2026", ["right"])
-    
-    env = suite.make(
+
+    # Use our wrapper so cube randomization works correctly
+    env = RoboSuiteEnvV3(
+        render=True,
+        domain_randomization=args.domain_rand,
+        perturbation_prob=0.0,            # No perturbations during eval
+        wide_randomization=True,
+        curriculum_level=args.difficulty,  # Set difficulty directly
+    )
+
+    # We also need camera observations for the overlay.
+    # Re-create the underlying suite env with camera enabled.
+    arm_controller_config = suite.load_part_controller_config(
+        default_controller="JOINT_VELOCITY"
+    )
+    controller_config = refactor_composite_controller_config(
+        arm_controller_config, "Rover2026", ["right"]
+    )
+    placement_init = env._build_placement_initializer()
+
+    raw_env = suite.make(
         env_name="Lift",
         robots=["Rover2026"],
         controller_configs=controller_config,
@@ -262,106 +279,17 @@ def evaluate_v3(args):
         control_freq=20,
         horizon=400,
         reward_shaping=True,
+        placement_initializer=placement_init,
     )
-    
-    obs_keys = [
-        'robot0_joint_pos', 'robot0_joint_vel', 'robot0_eef_pos',
-        'robot0_eef_quat', 'robot0_gripper_qpos', 'cube_pos', 'gripper_to_cube_pos',
-    ]
-    
-    # Episode state (mirror RoboSuiteEnvV3)
-    was_lifted = False
-    holding_cube = False
-    drop_detected = False
-    max_height = 0.0
-    steps_since_drop = 0
-    recovery_count = 0
-    
-    def process_obs(obs_dict):
-        nonlocal was_lifted, holding_cube, drop_detected, max_height, steps_since_drop, recovery_count
-        
-        obs_list = [np.array(obs_dict[k]).flatten() for k in obs_keys if k in obs_dict]
-        base_obs = np.concatenate(obs_list).astype(np.float32)
-        
-        # Compute phase (Logic mirrors RoboSuiteEnvV3)
-        cube_pos = obs_dict.get('cube_pos', [0, 0, 0])
-        gripper_to_cube = obs_dict.get('gripper_to_cube_pos', [0, 0, 0])
-        gripper_qpos = obs_dict.get('robot0_gripper_qpos', [0, 0])
-        
-        distance = np.linalg.norm(gripper_to_cube)
-        gripper_closed = np.mean(gripper_qpos) < 0.02
-        height = max(0, cube_pos[2] - 0.82)
-        
-        # Track holding
-        currently_holding = gripper_closed and distance < 0.12 and height > 0.02
-        
-        # Drop detection
-        if holding_cube and not currently_holding:
-            if height < 0.03:
-                if not drop_detected:
-                    drop_detected = True
-                    steps_since_drop = 0
-        
-        holding_cube = currently_holding
-        
-        if drop_detected:
-            steps_since_drop += 1
-        
-        # Successful Recovery
-        if drop_detected and height > 0.04 and currently_holding:
-            drop_detected = False
-            recovery_count += 1
-        
-        if currently_holding and height > 0:
-            max_height = max(max_height, height)
-            was_lifted = True
-            
-        # Phase encoding (6-dim)
-        phase = np.zeros(6, dtype=np.float32)
-        
-        if drop_detected:
-            phase[4] = 1.0  # Recover
-        elif height > 0.20 and currently_holding:
-            phase[5] = 1.0  # Return (NEW)
-        elif height > 0.08 and currently_holding:
-            phase[3] = 1.0  # Hold
-        elif height > 0.01 or (gripper_closed and distance < 0.1):
-            phase[2] = 1.0  # Lift
-        elif distance < 0.1:
-            phase[1] = 1.0  # Grasp
-        else:
-            phase[0] = 1.0  # Reach
-        
-        # Extra state (3-dim)
-        extra = np.array([
-            float(was_lifted),
-            float(drop_detected),
-            min(1.0, steps_since_drop / 100.0) if drop_detected else 0.0,
-        ], dtype=np.float32)
-        
-        return np.concatenate([base_obs, phase, extra]).astype(np.float32), distance, height
-    
-    def randomize_cube(level=2):
-        if not args.domain_rand:
-            return
-        ranges = [(-0.08, 0.08), (-0.15, 0.15), (-0.25, 0.25)]
-        r = ranges[min(level, 2)]
-        try:
-            cube_id = env.sim.model.body_name2id('cube_main')
-            pos = env.sim.model.body_pos[cube_id].copy()
-            pos[0] += np.random.uniform(*r)
-            pos[1] += np.random.uniform(*r)
-            env.sim.model.body_pos[cube_id] = pos
-            env.sim.forward()
-        except:
-            pass
-    
-    # Get obs_dim
-    test_obs = env.reset()
-    obs, _, _ = process_obs(test_obs)
-    obs_dim = len(obs)
-    
-    # Create agent
+    # Swap in the camera-enabled env, keeping the wrapper logic
+    env.env.close()
+    env.env = raw_env
+    env.render_enabled = True
+    env._setup_spaces()
+
+    obs_dim = env.obs_dim
+
+    # Create agent and load checkpoint
     agent = HierarchicalSACAgentV3(
         obs_dim=obs_dim,
         action_dim=env.action_dim,
@@ -369,70 +297,74 @@ def evaluate_v3(args):
         use_amp=False,
     )
     agent.load(args.eval)
-    
+
     print(f"\n{'='*60}")
     print(f"  EVALUATING V3: {args.eval}")
     print(f"{'='*60}")
     print(f"  Domain Randomization: {args.domain_rand}")
+    print(f"  Difficulty: {args.difficulty}")
     print(f"  Skills: {SkillSelectorV3.SKILL_NAMES}")
     print(f"{'='*60}\n")
-    
+
     cv2.namedWindow("Gripper Camera", cv2.WINDOW_NORMAL)
     cv2.resizeWindow("Gripper Camera", 400, 400)
-    
+
     for episode in range(args.eval_episodes):
-        raw_obs = env.reset()
-        
-        # Reset state
-        was_lifted = False
-        holding_cube = False
-        drop_detected = False
-        max_height = 0.0
-        steps_since_drop = 0
-        recovery_count = 0
-        
-        randomize_cube(args.difficulty)
-        raw_obs = env._get_observations()
-        
-        obs, distance, height = process_obs(raw_obs)
+        obs = env.reset()
         agent.reset()
         episode_reward = 0
         done = False
         skill_seq = []
-        
+
         while not done:
             action, skill = agent.get_action(obs, deterministic=True)
             skill_seq.append(skill)
-            
-            raw_obs, reward, done, info = env.step(action)
-            obs, distance, height = process_obs(raw_obs)
+
+            obs, reward, done, info = env.step(action, skill=skill)
             episode_reward += reward
-            
+
             env.render()
-            
-            # Show gripper camera
+
+            # Show gripper camera overlay
+            raw_obs = env.env._get_observations()
             img_key = "robot0_eye_in_hand_image"
             if img_key in raw_obs:
                 img = cv2.cvtColor(raw_obs[img_key], cv2.COLOR_RGB2BGR)
-                cv2.putText(img, f"Skill: {SkillSelectorV3.SKILL_NAMES[skill]}", 
-                           (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                cv2.putText(img, f"Dist: {distance:.3f}m | H: {height:.3f}m", 
-                           (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-                if drop_detected:
-                    cv2.putText(img, "DROP DETECTED - RECOVERING", 
-                               (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                cv2.putText(
+                    img,
+                    f"Skill: {SkillSelectorV3.SKILL_NAMES[skill]}",
+                    (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2,
+                )
+                cv2.putText(
+                    img,
+                    f"Dist: {info.get('distance', 0):.3f}m | "
+                    f"H: {info.get('height', 0):.3f}m",
+                    (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1,
+                )
+                if info.get('drop_detected', False):
+                    cv2.putText(
+                        img,
+                        "DROP DETECTED - RECOVERING",
+                        (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2,
+                    )
                 cv2.imshow("Gripper Camera", img)
                 cv2.waitKey(1)
-            
+
             time.sleep(0.02)
-        
-        from collections import Counter
-        skill_counts = Counter([SkillSelectorV3.SKILL_NAMES[s] for s in skill_seq])
-        skill_str = ", ".join([f"{k}: {v}" for k, v in skill_counts.most_common()])
-        
-        print(f"  Ep {episode+1}: R={episode_reward:.1f} | MaxH={max_height:.3f}m | "
-              f"Recoveries={recovery_count} | Skills: {skill_str}")
-    
+
+        skill_counts = Counter(
+            [SkillSelectorV3.SKILL_NAMES[s] for s in skill_seq]
+        )
+        skill_str = ", ".join(
+            [f"{k}: {v}" for k, v in skill_counts.most_common()]
+        )
+
+        print(
+            f"  Ep {episode+1}: R={episode_reward:.1f} | "
+            f"MaxH={info.get('max_height', 0):.3f}m | "
+            f"Recoveries={info.get('recovery_count', 0)} | Skills: {skill_str}"
+        )
+
     cv2.destroyAllWindows()
     env.close()
     print(f"\n  Evaluation complete!")

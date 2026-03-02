@@ -15,7 +15,7 @@ from .memory import GPUReplayBuffer
 class HierarchicalSACAgentV3:
     """
     Hierarchical SAC with:
-    - 5 skills (including Recovery)
+    - 6 skills (Reach, Grasp, Lift, Hold, Recover, Return)
     - Automatic entropy tuning for both levels
     - Double Q-learning
     """
@@ -37,10 +37,12 @@ class HierarchicalSACAgentV3:
         self.use_amp = use_amp and device == 'cuda'
         
         # Networks
+        num_skills = SkillSelectorV3.NUM_SKILLS
+        self.num_skills = num_skills
         self.skill_selector = SkillSelectorV3(obs_dim).to(device)
-        self.actor = SkillConditionedActorV3(obs_dim, action_dim, num_skills=5).to(device)
-        self.critic = DoubleCritic(obs_dim, action_dim).to(device)
-        self.critic_target = DoubleCritic(obs_dim, action_dim).to(device)
+        self.actor = SkillConditionedActorV3(obs_dim, action_dim, num_skills=num_skills).to(device)
+        self.critic = DoubleCritic(obs_dim, action_dim, num_skills=num_skills).to(device)
+        self.critic_target = DoubleCritic(obs_dim, action_dim, num_skills=num_skills).to(device)
         self.critic_target.load_state_dict(self.critic.state_dict())
         
         # Entropy coefficients (learnable)
@@ -48,7 +50,9 @@ class HierarchicalSACAgentV3:
         self.log_alpha_action = torch.tensor(np.log(alpha_init), requires_grad=True, device=device)
         
         # Target entropies
-        self.target_entropy_skill = -0.5 * np.log(1.0 / SkillSelectorV3.NUM_SKILLS)
+        # Skill entropy: encourage moderate commitment (not uniform, not collapsed)
+        # -log(1/N) = log(N) is max entropy; we target ~30% of max to allow specialization
+        self.target_entropy_skill = -0.3 * np.log(1.0 / SkillSelectorV3.NUM_SKILLS)
         self.target_entropy_action = -action_dim
         
         # Optimizers with fused AdamW
@@ -106,8 +110,17 @@ class HierarchicalSACAgentV3:
         self._current_skill = None
         self._skill_steps = 0
     
+    def _skill_to_onehot(self, skill):
+        """Convert skill indices (long tensor) to one-hot vectors."""
+        return F.one_hot(skill.long(), self.num_skills).float()
+
     def update(self, buffer: GPUReplayBuffer, batch_size: int = 256) -> Dict[str, float]:
-        """Update all networks."""
+        """Update all networks.
+        
+        The critic is conditioned on Q(s, a, z) where z is a one-hot
+        skill vector.  This lets it learn separate Q-values per skill,
+        preventing the skill selector from collapsing.
+        """
         obs, actions, rewards, next_obs, dones, stored_skills = buffer.sample(batch_size)
         
         amp_context = torch.amp.autocast('cuda', dtype=torch.bfloat16) if self.use_amp else torch.amp.autocast('cuda', enabled=False)
@@ -116,9 +129,10 @@ class HierarchicalSACAgentV3:
             # Sample new skills and actions for next state
             with torch.no_grad():
                 next_skill, next_skill_log_prob = self.skill_selector.sample(next_obs)
+                next_skill_onehot = self._skill_to_onehot(next_skill)
                 next_action, next_action_log_prob = self.actor.sample(next_obs, next_skill)
                 
-                q1_next, q2_next = self.critic_target(next_obs, next_action)
+                q1_next, q2_next = self.critic_target(next_obs, next_action, next_skill_onehot)
                 q_next = torch.min(q1_next, q2_next)
                 
                 # Combined entropy bonus
@@ -129,8 +143,9 @@ class HierarchicalSACAgentV3:
                 
                 target_q = rewards + (1 - dones) * self.gamma * (q_next - entropy_bonus)
             
-            # Critic loss
-            q1, q2 = self.critic(obs, actions)
+            # Critic loss — use the STORED skill from the replay buffer
+            stored_skill_onehot = self._skill_to_onehot(stored_skills.squeeze(-1))
+            q1, q2 = self.critic(obs, actions, stored_skill_onehot)
             critic_loss = F.mse_loss(q1, target_q) + F.mse_loss(q2, target_q)
         
         self.critic_optimizer.zero_grad()
@@ -145,11 +160,12 @@ class HierarchicalSACAgentV3:
             self.critic_optimizer.step()
         
         with amp_context:
-            # Actor loss
+            # Actor loss — sample fresh skill + action, evaluate with critic
             skill, skill_log_prob = self.skill_selector.sample(obs)
+            skill_onehot = self._skill_to_onehot(skill)
             action, action_log_prob = self.actor.sample(obs, skill)
             
-            q1_pi, q2_pi = self.critic(obs, action)
+            q1_pi, q2_pi = self.critic(obs, action, skill_onehot)
             q_pi = torch.min(q1_pi, q2_pi)
             
             actor_loss = (self.alpha_action * action_log_prob - q_pi).mean()
@@ -169,31 +185,29 @@ class HierarchicalSACAgentV3:
             self.actor_optimizer.step()
         
         with amp_context:
-            # Skill selector loss
+            # Skill selector loss — sample skill, get Q conditioned on it
             skill, skill_log_prob = self.skill_selector.sample(obs)
+            skill_onehot = self._skill_to_onehot(skill)
             action, _ = self.actor.sample(obs, skill)
             
-            q1_skill, q2_skill = self.critic(obs, action)
+            q1_skill, q2_skill = self.critic(obs, action, skill_onehot)
             q_skill = torch.min(q1_skill, q2_skill)
             
             skill_loss = (self.alpha_skill * skill_log_prob - q_skill).mean()
             
-            # Alpha (skill) loss with entropy regularization
+            # Alpha (skill) loss
             skill_entropy = self.skill_selector.entropy(obs).mean()
             alpha_skill_loss = -(self.log_alpha_skill * (skill_log_prob + self.target_entropy_skill).detach()).mean()
-            
-            # Encourage skill diversity
-            skill_diversity_bonus = 0.1 * skill_entropy
         
         self.skill_optimizer.zero_grad()
         if self.scaler:
-            self.scaler.scale(skill_loss + alpha_skill_loss - skill_diversity_bonus).backward()
+            self.scaler.scale(skill_loss + alpha_skill_loss).backward()
             self.scaler.unscale_(self.skill_optimizer)
             torch.nn.utils.clip_grad_norm_(self.skill_selector.parameters(), 1.0)
             self.scaler.step(self.skill_optimizer)
             self.scaler.update()
         else:
-            (skill_loss + alpha_skill_loss - skill_diversity_bonus).backward()
+            (skill_loss + alpha_skill_loss).backward()
             torch.nn.utils.clip_grad_norm_(self.skill_selector.parameters(), 1.0)
             self.skill_optimizer.step()
         
