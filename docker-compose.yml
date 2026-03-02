@@ -47,11 +47,29 @@ services:
     environment:
       - DISPLAY=${DISPLAY}
       - ROVERFLAKE_ROOT=/LearnFlake
-      - MUJOCO_GL=glfw # glfw/egl
+      - MUJOCO_GL=${MUJOCO_GL:-glfw} # default glfw; override with egl / osmesa / glx
       - __GLX_VENDOR_LIBRARY_NAME=nvidia
     network_mode: host
 
-  rover_gpu: # GPU integration (took me 4 hours to integrate)
+  rover_cpu: # CPU-only version of rover_gpu
+    container_name: rover_cpu
+    image: learnflake:cpu
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /LearnFlake
+    tty: true
+    stdin_open: true
+    environment:
+      - DISPLAY=${DISPLAY}
+      - ROVERFLAKE_ROOT=/LearnFlake
+      - MUJOCO_GL=${MUJOCO_GL:-glfw} # default glfw; override with egl / osmesa / glx
+    volumes:
+      - ./:/LearnFlake
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    network_mode: host
+
+  rover_gpu: # GPU (took me 4 hours to integrate)
     container_name: rover_gpu
     image: learnflake:gpu
     working_dir: /LearnFlake
@@ -65,7 +83,7 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
       - __GLX_VENDOR_LIBRARY_NAME=nvidia
-      - MUJOCO_GL=glfw # egl/glfw
+      - MUJOCO_GL=${MUJOCO_GL:-glfw} # default glfw; override with egl / osmesa / glx
     volumes:
       - ./:/LearnFlake
       - /tmp/.X11-unix:/tmp/.X11-unix

@@ -1,0 +1,183 @@
+# Ubuntu 22.04 LTS Dockerfile for LearnFlake (ROS2 Humble + RoboSuite)
+# Designed for Windows Docker Desktop
+#
+# Build:  docker compose -f docker-compose.ubuntu.yml build
+# Run:    docker compose -f docker-compose.ubuntu.yml run --rm rover_rl bash
+
+FROM ubuntu:22.04
+
+# Prevent interactive prompts during build
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Etc/UTC
+
+# Workspace configuration
+ENV ROVERFLAKE_ROOT=/LearnFlake
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+
+# Locale setup (required for ROS2)
+RUN apt-get update && apt-get install -y \
+    locales \
+    && locale-gen en_US en_US.UTF-8 \
+    && update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+
+# ============================================================================
+# ROS2 Humble Installation (Ubuntu 22.04 LTS)
+# ============================================================================
+RUN apt-get update && apt-get install -y \
+    software-properties-common \
+    curl \
+    gnupg \
+    lsb-release \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add ROS2 apt repository
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+# Install ROS2 Humble Desktop (full installation)
+RUN apt-get update && apt-get install -y \
+    ros-humble-desktop \
+    ros-humble-rmw-cyclonedds-cpp \
+    python3-colcon-common-extensions \
+    python3-rosdep \
+    python3-argcomplete \
+    && rm -rf /var/lib/apt/lists/*
+
+# ============================================================================
+# ROS2 Additional Packages
+# ============================================================================
+RUN apt-get update && apt-get install -y \
+    ros-humble-urdf \
+    ros-humble-xacro \
+    ros-humble-image-transport \
+    ros-humble-cv-bridge \
+    ros-humble-rosidl-default-generators \
+    ros-humble-rosidl-default-runtime \
+    ros-humble-ament-cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+# ============================================================================
+# System Dependencies
+# ============================================================================
+RUN apt-get update && apt-get install -y \
+    # Build essentials
+    build-essential \
+    cmake \
+    git \
+    wget \
+    curl \
+    vim \
+    nano \
+    # Python
+    python3 \
+    python3-pip \
+    python3-venv \
+    python-is-python3 \
+    # Graphics/Rendering (MuJoCo EGL support)
+    libegl1 \
+    libgl1 \
+    libgles2 \
+    libglvnd0 \
+    libglvnd-dev \
+    mesa-utils \
+    libosmesa6-dev \
+    libglfw3-dev \
+    # X11 for GUI (optional, works with WSLg)
+    libx11-6 \
+    libxcursor1 \
+    libxrandr2 \
+    libxinerama1 \
+    libxi6 \
+    libxxf86vm1 \
+    # Utilities
+    sudo \
+    tmux \
+    btop \
+    htop \
+    # Development libraries
+    libgtkmm-3.0-dev \
+    libsfml-dev \
+    # Serial communication
+    libusb-1.0-0-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ============================================================================
+# Python Dependencies
+# ============================================================================
+
+# Upgrade pip
+RUN python3 -m pip install --upgrade pip setuptools wheel
+
+# Remove distutils-installed sympy that conflicts with PyTorch
+RUN pip install --ignore-installed sympy
+
+# Install PyTorch (CPU) - with extended timeout for large download
+RUN pip install --no-cache-dir --default-timeout=300 --ignore-installed torch torchvision torchaudio
+
+# Install MuJoCo
+RUN pip install --no-cache-dir mujoco
+
+# Install core ML/RL dependencies (pinned versions for compatibility)
+# Note: numba requires specific numpy version, coverage causes issues with numba
+RUN pip install --no-cache-dir "numpy<1.25.0" "scipy<1.12.0" "numba>=0.57.0,<0.59.0" gymnasium stable-baselines3
+RUN pip uninstall -y coverage || true
+
+# Install gym 0.23 (specific version needed)
+RUN pip install --no-cache-dir gym==0.23.0
+
+# Install visualization and data tools
+RUN pip install --no-cache-dir tensorboard matplotlib h5py opencv-python Pillow
+
+# Install RoboSuite dependencies
+RUN pip install --no-cache-dir mink==0.0.5 qpsolvers pynput termcolor tqdm
+
+# Install pybullet
+RUN pip install --no-cache-dir pybullet
+
+# ============================================================================
+# Workspace Setup
+# ============================================================================
+WORKDIR ${ROVERFLAKE_ROOT}
+
+# Copy project files
+COPY . ${ROVERFLAKE_ROOT}
+
+# Initialize rosdep (ignore errors if already initialized)
+RUN rosdep init 2>/dev/null || true \
+    && rosdep update --rosdistro humble
+
+# Install ROS dependencies from package.xml files
+RUN . /opt/ros/humble/setup.sh \
+    && cd ${ROVERFLAKE_ROOT} \
+    && rosdep install --from-paths src --ignore-src -r -y 2>/dev/null || true
+
+# Install RoboSuite in editable mode
+RUN pip install -e ${ROVERFLAKE_ROOT}/src/external_pkgs/RoboSuite 2>/dev/null || true
+
+# Install rl_autonomy requirements
+RUN pip install -r ${ROVERFLAKE_ROOT}/src/rl_autonomy/requirements.txt 2>/dev/null || true
+
+# ============================================================================
+# MuJoCo Rendering Configuration
+# ============================================================================
+
+# Default to GLFW (GUI). Override with MUJOCO_GL=egl for headless training.
+ENV MUJOCO_GL=glfw
+
+# For NVIDIA GPU support (uncomment if using GPU)
+# ENV __GLX_VENDOR_LIBRARY_NAME=nvidia
+# ENV NVIDIA_VISIBLE_DEVICES=all
+# ENV NVIDIA_DRIVER_CAPABILITIES=all
+
+# ============================================================================
+# Entrypoint
+# ============================================================================
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/bin/bash"]

@@ -1,0 +1,134 @@
+# Docker Compose for LearnFlake on Windows (Ubuntu 22.04 LTS)
+#
+# Prerequisites:
+#   - Docker Desktop for Windows with WSL2 backend
+#   - WSLg enabled for GUI support (Windows 11 or Windows 10 21H2+)
+#
+# Usage:
+#   Build:           docker compose -f docker-compose.ubuntu.yml build
+#   Run (CPU):       docker compose -f docker-compose.ubuntu.yml run --rm rover_cpu bash
+#   Run (GPU):       docker compose -f docker-compose.ubuntu.yml run --rm rover_gpu bash
+#   Run (RL):        docker compose -f docker-compose.ubuntu.yml run --rm rover_rl bash
+#   Background:      docker compose -f docker-compose.ubuntu.yml up -d rover_cpu
+#   Exec into:       docker compose -f docker-compose.ubuntu.yml exec rover_cpu bash
+#   Stop all:        docker compose -f docker-compose.ubuntu.yml down
+
+services:
+  # ============================================================================
+  # Base service (CPU only, minimal)
+  # ============================================================================
+  rover_base:
+    build:
+      context: .
+      dockerfile: Dockerfile.ubuntu
+    image: learnflake:ubuntu22.04
+    container_name: learnflake_base
+    working_dir: /LearnFlake
+    tty: true
+    stdin_open: true
+    volumes:
+      # Mount project directory (live code sync)
+      - ./:/LearnFlake
+    environment:
+      - ROVERFLAKE_ROOT=/LearnFlake
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - MUJOCO_GL=${MUJOCO_GL:-glfw}
+    # Bridge networking for Windows (host mode not available)
+    network_mode: bridge
+
+  # ============================================================================
+  # CPU service with GUI support (WSLg)
+  # ============================================================================
+  rover_cpu:
+    extends:
+      service: rover_base
+    container_name: learnflake_cpu
+    image: learnflake:ubuntu22.04-cpu
+    volumes:
+      - ./:/LearnFlake
+      # WSLg support for GUI applications
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /mnt/wslg:/mnt/wslg:ro
+    environment:
+      - ROVERFLAKE_ROOT=/LearnFlake
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - MUJOCO_GL=${MUJOCO_GL:-glfw}
+      # Display configuration for WSLg
+      - DISPLAY=${DISPLAY:-:0}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
+      - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
+      - PULSE_SERVER=/mnt/wslg/PulseServer
+      # Prevent X11 shared memory issues
+      - QT_X11_NO_MITSHM=1
+      - _JAVA_AWT_WM_NONREPARENTING=1
+
+  # ============================================================================
+  # RL Training service (CPU with full dependencies)
+  # ============================================================================
+  rover_rl:
+    extends:
+      service: rover_cpu
+    container_name: learnflake_rl
+    image: learnflake:ubuntu22.04-rl
+    environment:
+      - ROVERFLAKE_ROOT=/LearnFlake
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - MUJOCO_GL=${MUJOCO_GL:-glfw}
+      # Inherit DISPLAY from host; override to host.docker.internal:0.0 only when using VcXsrv on Windows
+      - DISPLAY=${DISPLAY:-:0}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
+      - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
+      - PULSE_SERVER=/mnt/wslg/PulseServer
+      - QT_X11_NO_MITSHM=1
+      # TensorBoard
+      - TENSORBOARD_LOGDIR=/LearnFlake/logs
+
+  # ============================================================================
+  # GPU service (NVIDIA with CUDA support)
+  # Requires: NVIDIA Container Toolkit installed
+  # ============================================================================
+  rover_gpu:
+    extends:
+      service: rover_cpu
+    container_name: learnflake_gpu
+    image: learnflake:ubuntu22.04-gpu
+    ports:
+      - "8888:8888"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, compute, utility]
+    environment:
+      - ROVERFLAKE_ROOT=/LearnFlake
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - MUJOCO_GL=${MUJOCO_GL:-glfw}
+      - __GLX_VENDOR_LIBRARY_NAME=nvidia
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - DISPLAY=${DISPLAY:-:0}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
+      - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
+      - PULSE_SERVER=/mnt/wslg/PulseServer
+      - QT_X11_NO_MITSHM=1
+
+
+
+  # ============================================================================
+  # Development service (with additional dev tools)
+  # ============================================================================
+  rover_dev:
+    extends:
+      service: rover_cpu
+    container_name: learnflake_dev
+    image: learnflake:ubuntu22.04-dev
+    # Expose common ports for development
+    ports:
+      # TensorBoard
+      - "6006:6006"
+      # Jupyter (if used)
+      - "8888:8888"
+      # ROS2 default DDS ports (optional)
+      - "7400-7410:7400-7410/udp"
