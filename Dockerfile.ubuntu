@@ -162,6 +162,33 @@ RUN pip install -e ${ROVERFLAKE_ROOT}/src/external_pkgs/RoboSuite 2>/dev/null ||
 RUN pip install -r ${ROVERFLAKE_ROOT}/src/rl_autonomy/requirements.txt 2>/dev/null || true
 
 # ============================================================================
+# rl_sar Dependencies (C++ runtime + framework source)
+# ============================================================================
+
+# Native libs required by rl_sar
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    liblcm-dev \
+    libyaml-cpp-dev \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install libtorch C++ (v2.0.1+cpu) under /opt/libtorch
+RUN wget -O /tmp/libtorch.zip "https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.0.1%2Bcpu.zip" \
+    && rm -rf /opt/libtorch \
+    && unzip /tmp/libtorch.zip -d /opt \
+    && rm -f /tmp/libtorch.zip
+
+# Export Torch location for CMake consumers
+ENV Torch_DIR="/opt/libtorch"
+ENV LD_LIBRARY_PATH="/opt/libtorch/lib:${LD_LIBRARY_PATH}"
+
+# Clone rl_sar framework into external packages
+RUN mkdir -p ${ROVERFLAKE_ROOT}/src/external_pkgs \
+    && if [ ! -d "${ROVERFLAKE_ROOT}/src/external_pkgs/rl_sar/.git" ]; then \
+         git clone https://github.com/fan-ziqi/rl_sar.git ${ROVERFLAKE_ROOT}/src/external_pkgs/rl_sar ; \
+       fi
+
+# ============================================================================
 # MuJoCo Rendering Configuration
 # ============================================================================
 
