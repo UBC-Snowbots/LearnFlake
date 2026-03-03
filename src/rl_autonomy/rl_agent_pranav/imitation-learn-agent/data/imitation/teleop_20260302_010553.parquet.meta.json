@@ -1,0 +1,26 @@
+{
+  "num_rows": 189,
+  "created_at": "2026-03-02T01:06:01.348118",
+  "format": "parquet",
+  "schema_hint": [
+    "step",
+    "t",
+    "key",
+    "cmd_vx",
+    "cmd_vy",
+    "cmd_vz",
+    "gripper_cmd",
+    "joint_vel_cmd",
+    "action",
+    "reward",
+    "done",
+    "is_success",
+    "eef_pos",
+    "robot0_joint_pos",
+    "robot0_joint_vel",
+    "robot0_eef_pos",
+    "robot0_eef_quat",
+    "cube_pos",
+    "gripper_to_cube_pos"
+  ]
+}
