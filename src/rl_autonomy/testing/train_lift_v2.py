@@ -816,7 +816,14 @@ class HierarchicalSACAgent:
         self.prev_action = action
         return action, skill.cpu().numpy()[0]
     
-    def update(self, replay_buffer, batch_size=1024, demo_batch=None, bc_weight=0.0):
+    def update(
+        self,
+        replay_buffer,
+        batch_size=1024,
+        demo_batch=None,
+        bc_weight=0.0,
+        phase_weight=0.0,
+    ):
         """
         Update actor, critics, skill selector, and entropy terms.
 
@@ -825,6 +832,7 @@ class HierarchicalSACAgent:
         - batch_size: number of samples per update
         - demo_batch: optional dict {'obs','actions'} for BC regularization
         - bc_weight: scalar weight for BC regularization term
+        - phase_weight: scalar weight for skill-vs-phase cross-entropy
 
         Outputs:
         - metrics dict with losses and alphas (floats)
@@ -883,17 +891,26 @@ class HierarchicalSACAgent:
             if demo_batch is not None and bc_weight > 0.0:
                 demo_obs = demo_batch['obs']
                 demo_actions = demo_batch['actions']
-                b = demo_obs.shape[0]
-                k = SkillSelector.NUM_SKILLS
-                # Evaluate all discrete skills, then take the best-matching one per sample.
-                demo_obs_rep = demo_obs.unsqueeze(1).expand(b, k, demo_obs.shape[1]).reshape(b * k, demo_obs.shape[1])
-                demo_skill_rep = torch.arange(k, device=self.device).unsqueeze(0).expand(b, k).reshape(b * k)
-                demo_pred_rep, _ = self.actor(
-                    demo_obs_rep, demo_skill_rep, deterministic=True, with_logprob=False
-                )
-                demo_pred = demo_pred_rep.view(b, k, -1)
-                mse_per_skill = ((demo_pred - demo_actions.unsqueeze(1)) ** 2).mean(dim=-1)
-                bc_loss = mse_per_skill.min(dim=1).values.mean()
+                # Prefer phase-conditioned BC if phase one-hot exists in obs tail.
+                # This keeps each skill semantically grounded.
+                if demo_obs.shape[1] >= SkillSelector.NUM_SKILLS:
+                    demo_skill = demo_obs[:, -SkillSelector.NUM_SKILLS:].argmax(dim=-1)
+                    demo_pred, _ = self.actor(
+                        demo_obs, demo_skill, deterministic=True, with_logprob=False
+                    )
+                    bc_loss = F.mse_loss(demo_pred, demo_actions)
+                else:
+                    # Fallback for legacy demos without phase in observations.
+                    b = demo_obs.shape[0]
+                    k = SkillSelector.NUM_SKILLS
+                    demo_obs_rep = demo_obs.unsqueeze(1).expand(b, k, demo_obs.shape[1]).reshape(b * k, demo_obs.shape[1])
+                    demo_skill_rep = torch.arange(k, device=self.device).unsqueeze(0).expand(b, k).reshape(b * k)
+                    demo_pred_rep, _ = self.actor(
+                        demo_obs_rep, demo_skill_rep, deterministic=True, with_logprob=False
+                    )
+                    demo_pred = demo_pred_rep.view(b, k, -1)
+                    mse_per_skill = ((demo_pred - demo_actions.unsqueeze(1)) ** 2).mean(dim=-1)
+                    bc_loss = mse_per_skill.min(dim=1).values.mean()
                 actor_loss = actor_loss + float(bc_weight) * bc_loss
         
         self.actor_optimizer.zero_grad(set_to_none=True)
@@ -903,6 +920,7 @@ class HierarchicalSACAgent:
         self.scaler.step(self.actor_optimizer)
         
         # ---- Skill selector update ----
+        phase_ce = torch.tensor(0.0, device=self.device)
         with torch.amp.autocast(device_type='cuda', dtype=self.amp_dtype, enabled=self.use_amp):
             skill, skill_logprob, logits = self.skill_selector(obs, deterministic=False)
             new_action, _ = self.actor(obs, skill, deterministic=False)
@@ -911,6 +929,10 @@ class HierarchicalSACAgent:
             q_skill = torch.min(q1_skill, q2_skill)
             
             skill_loss = (self.alpha_skill * skill_logprob - q_skill).mean()
+            if phase_weight > 0.0 and obs.shape[1] >= SkillSelector.NUM_SKILLS:
+                phase_targets = obs[:, -SkillSelector.NUM_SKILLS:].argmax(dim=-1)
+                phase_ce = F.cross_entropy(logits, phase_targets)
+                skill_loss = skill_loss + float(phase_weight) * phase_ce
         
         self.skill_optimizer.zero_grad(set_to_none=True)
         self.scaler.scale(skill_loss).backward()
@@ -945,6 +967,7 @@ class HierarchicalSACAgent:
             'actor_loss': actor_loss.item(),
             'skill_loss': skill_loss.item(),
             'bc_loss': float(bc_loss.item()),
+            'phase_ce': float(phase_ce.item()),
             'alpha_skill': self.alpha_skill,
             'alpha_action': self.alpha_action,
         }
@@ -1066,6 +1089,14 @@ class RoboSuiteEnvV2:
         # Domain randomization bounds
         self.cube_x_range = (-0.1, 0.1)
         self.cube_y_range = (-0.1, 0.1)
+        
+        # Episode-local trackers for progress-based reward shaping.
+        self.cube_start_z = None
+        self.prev_distance = None
+        self.prev_height = None
+        self.prev_eef_z = None
+        self.prev_action = None
+        self.lift_milestones_hit = set()
     
     def _setup_spaces(self):
         """
@@ -1101,25 +1132,34 @@ class RoboSuiteEnvV2:
         Output:
         - phase: one-hot [4] for reach/grasp/lift/hold
         """
-        cube_pos = obs.get('cube_pos', [0, 0, 0])
         gripper_to_cube = obs.get('gripper_to_cube_pos', [0, 0, 0])
-        gripper_qpos = obs.get('robot0_gripper_qpos', [0, 0])
         
         distance = np.linalg.norm(gripper_to_cube)
-        gripper_closed = np.mean(gripper_qpos) < 0.02
-        height_above_table = max(0, cube_pos[2] - 0.82)
+        height_above_table = self._cube_lift_height(obs)
         
         # One-hot phase encoding
         phase = np.zeros(4, dtype=np.float32)
         if height_above_table > 0.08:
             phase[3] = 1.0  # Hold
-        elif height_above_table > 0.01 or (gripper_closed and distance < 0.1):
+        elif height_above_table > 0.015:
             phase[2] = 1.0  # Lift
-        elif distance < 0.1:
+        elif distance < 0.09:
             phase[1] = 1.0  # Grasp
         else:
             phase[0] = 1.0  # Reach
         return phase
+
+    def _cube_lift_height(self, obs):
+        """
+        Cube height relative to the episode start height.
+
+        Using relative height is more robust than a fixed table-z constant and
+        avoids reward drift across scene variations.
+        """
+        cube_pos = obs.get('cube_pos', [0, 0, 0])
+        cube_z = float(cube_pos[2])
+        base_z = cube_z if self.cube_start_z is None else float(self.cube_start_z)
+        return max(0.0, cube_z - base_z)
     
     def _process_obs(self, obs):
         """
@@ -1197,6 +1237,15 @@ class RoboSuiteEnvV2:
         obs = self.env.reset()
         self._randomize_cube_position()
         obs = self.env._get_observations()  # Re-get observations after randomization
+
+        # Initialize per-episode reward-shaping trackers.
+        self.cube_start_z = float(obs.get('cube_pos', [0.0, 0.0, 0.0])[2])
+        self.prev_distance = float(np.linalg.norm(obs.get('gripper_to_cube_pos', [0.0, 0.0, 0.0])))
+        self.prev_height = 0.0
+        eef_pos = obs.get('robot0_eef_pos', [0.0, 0.0, 0.0])
+        self.prev_eef_z = float(eef_pos[2]) if len(eef_pos) >= 3 else None
+        self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
+        self.lift_milestones_hit = set()
         
         state = self._process_obs(obs)
         image = self._process_image(obs)
@@ -1220,54 +1269,65 @@ class RoboSuiteEnvV2:
         - info: dict with phase diagnostics
         """
         obs, reward, done, info = self.env.step(action)
+        info = dict(info or {})
         
         # Get positions
-        cube_pos = obs.get('cube_pos', [0, 0, 0])
         gripper_to_cube = obs.get('gripper_to_cube_pos', [0, 0, 0])
         gripper_qpos = obs.get('robot0_gripper_qpos', [0, 0])
+        eef_pos = obs.get('robot0_eef_pos', [0, 0, 0])
         
-        distance = np.linalg.norm(gripper_to_cube)
+        distance = float(np.linalg.norm(gripper_to_cube))
         gripper_closed = np.mean(gripper_qpos) < 0.02
-        cube_height = cube_pos[2]
-        table_height = 0.82
-        height_above_table = max(0, cube_height - table_height)
-        
-        # =================================================================
-        # EXPONENTIALLY PROGRESSIVE REWARD STRUCTURE
-        # Each phase unlocks larger rewards, creating clear learning signal
-        # =================================================================
-        
-        # Phase 1: REACH (max ~5/step, ~1000/episode if just reaching)
-        # Exponential bonus as distance decreases
-        reach_reward = 5.0 * np.exp(-5.0 * distance)  # Peaks at ~5 when distance=0
-        
-        # Phase 2: GRASP (adds ~10-30/step when close)
+        height_above_table = self._cube_lift_height(obs)
+        eef_z = float(eef_pos[2]) if len(eef_pos) >= 3 else None
+
+        prev_distance = distance if self.prev_distance is None else float(self.prev_distance)
+        prev_height = height_above_table if self.prev_height is None else float(self.prev_height)
+        prev_eef_z = eef_z if self.prev_eef_z is None else self.prev_eef_z
+
+        # -----------------------------------------------------------------
+        # Cohesive, progress-based shaping:
+        # - reward progress (not just state occupancy) to reduce reward farming
+        # - explicit penalties for "descend blindly" behavior
+        # -----------------------------------------------------------------
+        reach_phi = np.exp(-8.0 * distance)
+        reach_phi_prev = np.exp(-8.0 * prev_distance)
+        reach_reward = 5.0 * (reach_phi - reach_phi_prev) + 0.15 * reach_phi
+
+        gripper_cmd = float(action[-1]) if len(action) > 0 else 0.0
+        near_for_grasp = distance < 0.07
+        touch_zone = distance < 0.045
         grasp_reward = 0.0
-        if distance < 0.15:
-            proximity_bonus = 10.0 * (1.0 - distance / 0.15)  # 0-10 based on closeness
-            grasp_reward = proximity_bonus
-            if distance < 0.05:
-                grasp_reward += 15.0  # Very close bonus
-            if gripper_closed and distance < 0.08:
-                grasp_reward += 30.0  # Grasping bonus (big!)
-        
-        # Phase 3: LIFT (adds 50-500/step - THIS IS THE BIG REWARD)
+        if near_for_grasp and gripper_cmd > 0.2:
+            grasp_reward += 0.35
+        if touch_zone and gripper_closed:
+            grasp_reward += 0.75
+        if gripper_cmd > 0.25 and distance > 0.12:
+            grasp_reward -= 0.45
+        if gripper_cmd < -0.25 and (distance < 0.08 or height_above_table > 0.01):
+            grasp_reward -= 0.5
+
+        height_delta = height_above_table - prev_height
         lift_reward = 0.0
-        if gripper_closed and distance < 0.1:  # Must be grasping
-            if height_above_table > 0:
-                # Exponential reward for height - this should dominate!
-                lift_reward = 100.0 * height_above_table  # Linear base
-                lift_reward += 500.0 * (height_above_table ** 2)  # Quadratic boost
-                lift_reward += 50.0  # Constant bonus for any lift
-        
-        # Phase 4: SUCCESS (massive one-time bonus)
+        if gripper_closed and (distance < 0.09 or height_above_table > 0.003):
+            lift_reward += 30.0 * float(np.clip(height_delta, -0.02, 0.02))
+            lift_reward += 4.0 * float(np.clip(height_above_table / 0.12, 0.0, 1.5))
+
         success_reward = 0.0
-        if height_above_table > 0.05:
-            success_reward = 200.0  # Partial success
-        if height_above_table > 0.1:
-            success_reward = 500.0  # Full success
-        if height_above_table > 0.15:
-            success_reward = 1000.0  # Excellent lift
+        for thr, bonus in ((0.015, 2.0), (0.04, 6.0), (0.08, 14.0)):
+            if height_above_table >= thr and thr not in self.lift_milestones_hit:
+                self.lift_milestones_hit.add(thr)
+                success_reward += bonus
+
+        downward_penalty = 0.0
+        if eef_z is not None and prev_eef_z is not None:
+            eef_dz = eef_z - prev_eef_z
+            if eef_dz < -0.002 and distance > 0.12 and height_above_table < 0.005:
+                downward_penalty -= 6.0 * abs(eef_dz)
+        if len(gripper_to_cube) >= 3 and gripper_to_cube[2] < -0.03 and distance > 0.08 and height_above_table < 0.005:
+            downward_penalty -= 0.25
+        if prev_height - height_above_table > 0.004:
+            downward_penalty -= 15.0 * (prev_height - height_above_table)
         
         # Skill bonus: simplified - just a small consistency bonus
         # The main learning signal comes from task rewards, not skill matching
@@ -1280,17 +1340,42 @@ class RoboSuiteEnvV2:
         
         # Simple skill consistency: small bonus for matching, no penalty
         if skill is not None and skill == actual_phase:
-            skill_bonus = 3.0  # Small bonus, won't dominate task rewards
+            skill_bonus = 0.25
         
         # Action smoothness penalty (reduce shakiness)
-        action_penalty = -0.05 * np.sum(action ** 2)
+        prev_action = action if self.prev_action is None else self.prev_action
+        action_penalty = -0.01 * float(np.sum(action ** 2))
+        action_penalty -= 0.005 * float(np.sum((action - prev_action) ** 2))
         
-        shaped_reward = reward + reach_reward + grasp_reward + lift_reward + success_reward + skill_bonus + action_penalty
+        shaped_reward = (
+            float(reward)
+            + reach_reward
+            + grasp_reward
+            + lift_reward
+            + success_reward
+            + skill_bonus
+            + action_penalty
+            + downward_penalty
+        )
+        shaped_reward = float(np.clip(shaped_reward, -10.0, 30.0))
+
+        # Update trackers for next step.
+        self.prev_distance = distance
+        self.prev_height = height_above_table
+        self.prev_eef_z = eef_z
+        self.prev_action = np.array(action, dtype=np.float32, copy=True)
         
         # Store phase info for debugging
         phase_names = ['reach', 'grasp', 'lift', 'hold']
         info['phase'] = phase_names[actual_phase]
         info['actual_phase'] = actual_phase
+        info['reward_env'] = float(reward)
+        info['reward_reach'] = float(reach_reward)
+        info['reward_grasp'] = float(grasp_reward)
+        info['reward_lift'] = float(lift_reward)
+        info['reward_success'] = float(success_reward)
+        info['reward_down'] = float(downward_penalty)
+        info['reward_action'] = float(action_penalty)
         info['skill_bonus'] = skill_bonus
         info['height'] = height_above_table
         info['distance'] = distance
@@ -1610,6 +1695,8 @@ def train(args):
     print(f"  Skills: {SkillSelector.SKILL_NAMES}")
     print(f"  Episodes: {args.episodes} | Batch: {args.batch_size}")
     print(f"  Hidden: {hidden_sizes}")
+    print(f"  Phase supervision weight: {args.phase_supervision_weight}")
+    print(f"  Skill diversity bonus: {args.skill_div_bonus}")
     print(f"  Save: {save_dir}")
     print("="*70 + "\n")
     
@@ -1669,10 +1756,13 @@ def train(args):
                 img = images[i] if images is not None else None
                 next_img = next_images[i] if next_images is not None else None
                 
-                # Add diversity bonus: reward underused skills
-                total_skill_usage = skill_counts.sum() + 1e-8
-                skill_usage_pct = skill_counts[skills[i]] / total_skill_usage
-                diversity_bonus = 1.0 if skill_usage_pct < 0.25 else 0.0  # Bonus for underused skills
+                # Optional diversity bonus (off by default to avoid distorting task rewards).
+                diversity_bonus = 0.0
+                if args.skill_div_bonus > 0.0:
+                    total_skill_usage = skill_counts.sum() + 1e-8
+                    skill_usage_pct = skill_counts[skills[i]] / total_skill_usage
+                    if skill_usage_pct < 0.25:
+                        diversity_bonus = float(args.skill_div_bonus)
                 
                 reward_with_bonus = rewards[i] + diversity_bonus
                 replay_buffer.add(obs[i], actions[i], reward_with_bonus, next_obs[i], float(dones[i]), img, next_img)
@@ -1720,6 +1810,7 @@ def train(args):
                         args.batch_size,
                         demo_batch=demo_batch,
                         bc_weight=args.demo_bc_weight,
+                        phase_weight=args.phase_supervision_weight,
                     )
                 torch.cuda.synchronize()
                 update_times.append(time.perf_counter() - update_start)
@@ -1754,12 +1845,15 @@ def train(args):
             bc_str = ""
             if demo_batch_buffer is not None and args.demo_bc_weight > 0.0:
                 bc_str = f" bc={last_metrics.get('bc_loss', 0.0):.4f}"
+            phase_str_extra = ""
+            if args.phase_supervision_weight > 0.0:
+                phase_str_extra = f" ce={last_metrics.get('phase_ce', 0.0):.4f}"
             
             print(f"  Ep {episode:5d} | Steps {total_steps:8,} | Reward {avg_reward:7.1f} | "
                   f"α_s {agent.alpha_skill:.3f} α_a {agent.alpha_action:.3f} | "
                   f"Skills(pred): {skill_str} | Phase(actual): {phase_str} | "
                   f"match={match_pct:.1f}% | "
-                  f"max_h(avg100)={avg_max_h:.3f} succ@{args.success_height:.2f}m={succ_rate:.1f}%{bc_str} | "
+                  f"max_h(avg100)={avg_max_h:.3f} succ@{args.success_height:.2f}m={succ_rate:.1f}%{bc_str}{phase_str_extra} | "
                   f"RAM_avail={avail_ram_gb:.1f}GiB"
                   + (f" GPU_free={gpu_free_gb:.1f}GiB" if gpu_free_gb is not None else ""))
 
@@ -1852,7 +1946,7 @@ def evaluate(args):
         'gripper_to_cube_pos',
     ]
     
-    def process_obs(obs_dict):
+    def process_obs(obs_dict, cube_base_z):
         obs_list = []
         for key in obs_keys:
             if key in obs_dict:
@@ -1862,18 +1956,16 @@ def evaluate(args):
         # Compute phase
         cube_pos = obs_dict.get('cube_pos', [0, 0, 0])
         gripper_to_cube = obs_dict.get('gripper_to_cube_pos', [0, 0, 0])
-        gripper_qpos = obs_dict.get('robot0_gripper_qpos', [0, 0])
         
         distance = np.linalg.norm(gripper_to_cube)
-        gripper_closed = np.mean(gripper_qpos) < 0.02
-        height = max(0, cube_pos[2] - 0.82)
+        height = max(0, float(cube_pos[2]) - float(cube_base_z))
         
         phase = np.zeros(4, dtype=np.float32)
         if height > 0.08:
             phase[3] = 1.0
-        elif height > 0.01 or (gripper_closed and distance < 0.1):
+        elif height > 0.015:
             phase[2] = 1.0
-        elif distance < 0.1:
+        elif distance < 0.09:
             phase[1] = 1.0
         else:
             phase[0] = 1.0
@@ -1895,7 +1987,8 @@ def evaluate(args):
     
     # Calculate obs_dim
     test_obs = env.reset()
-    obs, _, _, _ = process_obs(test_obs)
+    test_base_z = float(test_obs.get('cube_pos', [0.0, 0.0, 0.0])[2])
+    obs, _, _, _ = process_obs(test_obs, test_base_z)
     obs_dim = len(obs)
     
     # Create agent and load weights
@@ -1927,8 +2020,9 @@ def evaluate(args):
         raw_obs = env.reset()
         randomize_cube()
         raw_obs = env._get_observations()
+        episode_base_z = float(raw_obs.get('cube_pos', [0.0, 0.0, 0.0])[2])
         
-        obs, distance, height, actual_phase = process_obs(raw_obs)
+        obs, distance, height, actual_phase = process_obs(raw_obs, episode_base_z)
         max_height = height
         agent.reset()
         episode_reward = 0
@@ -1946,7 +2040,7 @@ def evaluate(args):
                 skill_match += 1
             
             raw_obs, reward, done, info = env.step(action)
-            obs, distance, height, actual_phase = process_obs(raw_obs)
+            obs, distance, height, actual_phase = process_obs(raw_obs, episode_base_z)
             max_height = max(max_height, height)
             
             episode_reward += reward
@@ -2040,6 +2134,10 @@ if __name__ == "__main__":
                             help='Cap for demo BC minibatch size per update')
     train_args.add_argument('--demo_bc_weight', type=float, default=0.1,
                             help='Weight for demo behavior-cloning regularization term')
+    train_args.add_argument('--phase_supervision_weight', type=float, default=0.2,
+                            help='Weight for cross-entropy alignment of selected skill vs detected phase')
+    train_args.add_argument('--skill_div_bonus', type=float, default=0.0,
+                            help='Optional reward bonus for underused skills (0 disables)')
     train_args.add_argument('--demo_skip_warmup', action='store_true',
                             help='Skip random warmup when replay was prefilled with demos')
     train_args.add_argument('--low_mem', action='store_true',

@@ -337,17 +337,18 @@ class RoboSuiteEnvV3:
         # V3 REWARD STRUCTURE: Recovery-aware
         # =================================================================
         
-        # Phase 1: REACH
-        reach_reward = 5.0 * np.exp(-5.0 * distance)
+        # Phase 1: REACH — dense, always-on shaping so the agent is pulled toward the cube
+        reach_reward = 10.0 * np.exp(-3.0 * distance)          # broader, stronger gradient
+        reach_reward += 5.0 * max(0, 1.0 - distance / 0.4)    # linear bonus within 0.4m
         
         # Phase 2: GRASP
         grasp_reward = 0.0
         if distance < 0.15:
-            grasp_reward = 10.0 * (1.0 - distance / 0.15)
+            grasp_reward = 15.0 * (1.0 - distance / 0.15)
             if distance < 0.05:
-                grasp_reward += 15.0
+                grasp_reward += 25.0
             if gripper_closed and distance < 0.08:
-                grasp_reward += 30.0
+                grasp_reward += 50.0
         
         # Phase 3: LIFT
         lift_reward = 0.0
@@ -466,22 +467,16 @@ class RoboSuiteEnvV3:
         action_smoothness = 0.0
         if self._prev_action is not None:
             action_delta = np.linalg.norm(action - self._prev_action)
-            # Reward small changes, penalize large ones
-            # Threshold: delta < 0.3 is smooth, > 0.8 is jerky
-            if action_delta < 0.3:
-                action_smoothness = 2.0 * (1.0 - action_delta / 0.3)  # Bonus up to +2
-            elif action_delta > 0.8:
-                action_smoothness = -3.0 * (action_delta - 0.8)  # Penalty for jerk
+            # Only penalize extreme jerk — do NOT reward stillness
+            if action_delta > 1.2:
+                action_smoothness = -1.0 * (action_delta - 1.2)  # Penalty for extreme jerk only
         
-        # 2. Velocity smoothness: penalize sudden velocity changes (acceleration)
+        # 2. Velocity smoothness: penalize extreme acceleration only
         velocity_smoothness = 0.0
         if self._prev_joint_vel is not None:
             vel_delta = np.linalg.norm(joint_vel - self._prev_joint_vel)
-            # Smooth acceleration is vel_delta < 0.5
-            if vel_delta < 0.5:
-                velocity_smoothness = 1.5 * (1.0 - vel_delta / 0.5)  # Bonus up to +1.5
-            elif vel_delta > 1.5:
-                velocity_smoothness = -2.0 * (vel_delta - 1.5)  # Penalty for jerky motion
+            if vel_delta > 2.0:
+                velocity_smoothness = -0.5 * (vel_delta - 2.0)  # Penalty for extreme jerk only
         
         # 3. End-effector path smoothness: reward straight-line motion toward goal
         path_smoothness = 0.0
@@ -500,17 +495,15 @@ class RoboSuiteEnvV3:
                 if alignment > 0.5:
                     path_smoothness = 2.0 * alignment  # Bonus for efficient path
             
-            # Penalize erratic high-speed motion
-            if eef_speed > 0.05:  # Moving fast
-                path_smoothness -= 0.5 * max(0, eef_speed - 0.05)
+            # Penalize only extremely erratic high-speed motion
+            if eef_speed > 0.15:  # Very fast only
+                path_smoothness -= 0.3 * max(0, eef_speed - 0.15)
         
-        # 4. Low velocity magnitude bonus (controlled, deliberate motion)
+        # 4. Penalize flailing only — do NOT reward low velocity (encourages freezing)
         vel_magnitude = np.linalg.norm(joint_vel)
         controlled_motion_bonus = 0.0
-        if vel_magnitude < 1.0:
-            controlled_motion_bonus = 0.5 * (1.0 - vel_magnitude)  # Small bonus for slow control
-        elif vel_magnitude > 3.0:
-            controlled_motion_bonus = -1.0 * (vel_magnitude - 3.0)  # Penalty for flailing
+        if vel_magnitude > 5.0:
+            controlled_motion_bonus = -0.5 * (vel_magnitude - 5.0)  # Penalty for flailing only
         
         smoothness_reward = (
             action_smoothness + 
@@ -527,42 +520,26 @@ class RoboSuiteEnvV3:
         # Get joint positions for posture analysis
         joint_pos = obs.get('robot0_joint_pos', np.zeros(7))
         
-        # 1. Minimal joint movement: reward small total joint displacement
-        #    Encourages efficient paths that don't contort unnecessarily
+        # 1. Penalize excessive movement only — do NOT reward minimal movement
         joint_movement_reward = 0.0
-        total_joint_movement = np.sum(np.abs(action[:6]))  # Exclude gripper (last action)
-        if total_joint_movement < 1.0:
-            joint_movement_reward = 1.5 * (1.0 - total_joint_movement)  # Bonus for minimal movement
-        elif total_joint_movement > 3.0:
-            joint_movement_reward = -1.0 * (total_joint_movement - 3.0)  # Penalty for excessive movement
+        total_joint_movement = np.sum(np.abs(action[:6]))  # Exclude gripper
+        if total_joint_movement > 5.0:
+            joint_movement_reward = -0.5 * (total_joint_movement - 5.0)
         
-        # 2. Low torque/effort: penalize large action magnitudes (proxy for torque)
-        #    Encourages the arm to work "smarter not harder"
+        # 2. Penalize extreme effort only
         effort_penalty = 0.0
         action_magnitude = np.linalg.norm(action[:6])  # Exclude gripper
-        if action_magnitude < 0.5:
-            effort_penalty = 1.0  # Bonus for low effort
-        elif action_magnitude > 2.0:
-            effort_penalty = -0.5 * (action_magnitude - 2.0)  # Penalty for high effort
+        if action_magnitude > 3.0:
+            effort_penalty = -0.3 * (action_magnitude - 3.0)
         
-        # 3. Natural pose reward: prefer joint angles near center of range
-        #    Avoids extreme joint positions (contorted poses)
-        #    Assumes joints are normalized to [-1, 1] range
+        # 3. Joint limit avoidance only — remove centered-pose bonus (it prevents reaching)
         pose_reward = 0.0
-        joint_extremity = np.mean(np.abs(joint_pos[:6]))  # How far from center (0)
-        if joint_extremity < 0.5:
-            pose_reward = 1.0 * (1.0 - joint_extremity / 0.5)  # Bonus for centered joints
-        elif joint_extremity > 0.8:
-            pose_reward = -1.5 * (joint_extremity - 0.8)  # Penalty for extreme poses
         
-        # 4. Joint limit avoidance: strong penalty near joint limits
-        #    Prevents the arm from reaching awkward configurations
+        # 4. Joint limit avoidance: penalty only very near limits
         joint_limit_penalty = 0.0
         for i, jp in enumerate(joint_pos[:6]):
-            if abs(jp) > 0.9:  # Very close to limit
-                joint_limit_penalty -= 2.0 * (abs(jp) - 0.9)
-            elif abs(jp) > 0.75:  # Approaching limit
-                joint_limit_penalty -= 0.5 * (abs(jp) - 0.75)
+            if abs(jp) > 0.95:  # Only penalize very close to hard limit
+                joint_limit_penalty -= 1.5 * (abs(jp) - 0.95)
         
         # 5. Symmetric arm preference: slight bonus for balanced left-right movement
         #    Encourages more natural, human-like reaching

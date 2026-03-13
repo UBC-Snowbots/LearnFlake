@@ -49,6 +49,8 @@ services:
       - ROVERFLAKE_ROOT=/LearnFlake
       - MUJOCO_GL=glfw # glfw/egl
       - __GLX_VENDOR_LIBRARY_NAME=nvidia
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
     network_mode: host
 
   rover_gpu: # GPU integration (took me 4 hours to integrate)
@@ -66,6 +68,8 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=all
       - __GLX_VENDOR_LIBRARY_NAME=nvidia
       - MUJOCO_GL=glfw # egl/glfw
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
     volumes:
       - ./:/LearnFlake
       - /tmp/.X11-unix:/tmp/.X11-unix
