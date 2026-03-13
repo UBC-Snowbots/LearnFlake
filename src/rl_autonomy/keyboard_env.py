@@ -468,3 +468,83 @@ class CoarseReachEnv(KeyboardEnv):
         xy_dist = float(np.linalg.norm(eef_pos[:2] - key_pos[:2]))
         z_error = float(abs((eef_pos[2] - key_pos[2]) - self.HOVER_HEIGHT))
         return xy_dist < self.SUCCESS_XY and z_error < self.SUCCESS_Z
+
+
+class PressKeyEnv(KeyboardEnv):
+    """
+    Skill 3: Extend the solenoid to press the target key and hold for 3 steps.
+
+    Assumes the arm is already aligned above the key (CoarseReach has run).
+    Only the solenoid actuator (action[-1]) is active; arm joints are locked to 0.
+    Episode terminates on 3-step contact hold (success) or timeout (50 steps).
+    """
+
+    HOLD_STEPS = 3   # consecutive contact steps required for success
+
+    def __init__(self, coarse_reach_checkpoint: str | None = None,
+                 random_key: bool = True, **kwargs):
+        kwargs.setdefault('horizon', 50)
+        self.random_key = random_key
+        self.coarse_reach_checkpoint = coarse_reach_checkpoint
+        self._cr_policy = None
+        super().__init__(**kwargs)
+        # Load CoarseReach policy AFTER full env init (avoids init-order issues)
+        if coarse_reach_checkpoint:
+            from stable_baselines3 import SAC
+            self._cr_policy = SAC.load(coarse_reach_checkpoint)
+
+    def _reset_internal(self):
+        super()._reset_internal()
+        self._contact_steps = 0
+        if self.random_key:
+            self.set_target_key(np.random.choice(self.AVAILABLE_KEYS))
+        if self._cr_policy is not None:
+            self._run_to_alignment()
+
+    def _run_to_alignment(self, max_steps: int = 300):
+        """Step with the CoarseReach policy until the EEF is above the target key."""
+        # Temporarily raise the horizon so the base env doesn't terminate mid-alignment
+        orig_horizon = self.horizon
+        self.horizon = max_steps + 10
+        try:
+            for _ in range(max_steps):
+                flat = self._flat_obs().astype(np.float32)
+                arm_action, _ = self._cr_policy.predict(flat, deterministic=True)
+                full_action = np.append(arm_action, 0.0)   # solenoid retracted
+                self.step(full_action)
+
+                eef = self.sim.data.site_xpos[self._eef_site_id]
+                key = self.sim.data.body_xpos[self._key_body_ids[self._target_key]]
+                if (np.linalg.norm(eef[:2] - key[:2]) < CoarseReachEnv.SUCCESS_XY
+                        and abs((eef[2] - key[2]) - CoarseReachEnv.HOVER_HEIGHT)
+                        < CoarseReachEnv.SUCCESS_Z):
+                    break
+        finally:
+            self.horizon = orig_horizon
+            self.timestep = 0
+            self.done = False
+
+    def reward(self, action=None):
+        act_pos = float(self.sim.data.qpos[self._actuator_qpos_addr])
+        act_vel = float(self.sim.data.qvel[self._actuator_qvel_addr])
+        force   = float(np.linalg.norm(
+            self.sim.data.cfrc_ext[self._actuator_body_id][3:]
+        ))
+
+        contact = (force > CONTACT_FORCE_THRESHOLD
+                   and abs(act_vel) < STALL_VEL_THRESHOLD)
+
+        if contact:
+            self._contact_steps += 1
+            if self._contact_steps >= self.HOLD_STEPS:
+                return 1000.0
+            return 500.0
+        else:
+            self._contact_steps = 0
+
+        r_extend   = 5.0 * act_pos
+        r_stability = -2.0 * float(np.linalg.norm(action[:6])) if action is not None else 0.0
+        return r_extend + r_stability
+
+    def _check_success(self):
+        return self._contact_steps >= self.HOLD_STEPS
