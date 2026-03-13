@@ -1,0 +1,21 @@
+rover2026:
+  num_of_dofs: 6
+  joint_names:
+    - shoulder_joint
+    - link_1_joint
+    - link1_link2
+    - a4_rotation
+    - a5_rotation
+    - a6_rotation
+  joint_controller_names:
+    - shoulder_joint_controller
+    - link_1_joint_controller
+    - link1_link2_controller
+    - a4_rotation_controller
+    - a5_rotation_controller
+    - a6_rotation_controller
+  joint_mapping: [0, 1, 2, 3, 4, 5]
+  default_dof_pos: [-1.58, -1.20, 0.50, 0.0, -1.0, -1.5]
+  torque_limits: [87.0, 87.0, 87.0, 87.0, 12.0, 12.0]
+  control_mode: position
+

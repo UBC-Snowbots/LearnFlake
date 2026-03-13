@@ -1,0 +1,13 @@
+topic_map:
+  rl_sar_namespace: /rover2026_gazebo/
+  rl_sar_robot_command: /rover2026_gazebo/robot_joint_controller/command
+  rl_sar_robot_state: /rover2026_gazebo/robot_joint_controller/state
+  rl_sar_joint_states: /rover2026_gazebo/joint_states
+  rl_sar_cmd_vel: /cmd_vel
+  rl_sar_joy: /joy
+  rl_sar_imu: /imu
+
+  learnflake_arm_command: /arm/command
+  learnflake_arm_feedback: /arm/feedback
+  note: "Use a bridge/remap node when connecting rl_sar topics to LearnFlake arm topics."
+

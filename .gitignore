@@ -72,7 +72,16 @@ rl/
 # Ignore rl_autonomy for now
 #src/rl_autonomy/
 src/rl_autonomy/env.py
+src/external_pkgs/moteus_ros2/
+src/external_pkgs/RoboSuite/
+src/external_pkgs/serial/
 
 .venv
 src/MUJOCO_LOG.TXT
 git_log_capture.txt
+
+# Ignore local RLKit experiment artifacts and notes
+doc.md
+src/rl_autonomy/rl_agent_pranav/HRL-system/Alpha/rover2026_rlkit/videos/*.mp4
+src/rl_autonomy/rl_agent_pranav/HRL-system/Alpha/rover2026_rlkit/doc.md
+src/rl_autonomy/rl_agent_pranav/HRL-system/Alpha/rover2026_rlkit/REPORT.md

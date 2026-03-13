@@ -1,0 +1,39 @@
+<launch>
+    <arg name="wname" default="stairs"/>
+    <arg name="rname" default="rover2026"/>
+
+    <param name="robot_name" type="str" value="$(arg rname)"/>
+    <param name="ros_namespace" type="str" value="/$(arg rname)_gazebo/"/>
+    <param name="gazebo_model_name" type="str" value="$(arg rname)_gazebo"/>
+
+    <arg name="paused" default="false"/>
+    <arg name="use_sim_time" default="true"/>
+    <arg name="gui" default="true"/>
+    <arg name="headless" default="false"/>
+    <arg name="debug" default="false"/>
+
+    <include file="$(find gazebo_ros)/launch/empty_world.launch">
+        <arg name="world_name" value="$(find rl_sar)/worlds/$(arg wname).world"/>
+        <arg name="debug" value="$(arg debug)"/>
+        <arg name="gui" value="$(arg gui)"/>
+        <arg name="paused" value="$(arg paused)"/>
+        <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+        <arg name="headless" value="$(arg headless)"/>
+    </include>
+
+    <param name="robot_description"
+           textfile="$(find rover2026_description)/urdf/rover2026.urdf"/>
+
+    <node pkg="gazebo_ros" type="spawn_model" name="urdf_spawner" respawn="false" output="screen"
+          args="-urdf -z 1.0 -model rover2026_gazebo -param robot_description"/>
+
+    <rosparam file="$(find rover2026_description)/config/robot_control.yaml" command="load"/>
+
+    <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher"
+          respawn="false" output="screen">
+        <remap from="/joint_states" to="/rover2026_gazebo/joint_states"/>
+    </node>
+
+    <node pkg="joy" type="joy_node" name="joy_node" output="screen"/>
+</launch>
+

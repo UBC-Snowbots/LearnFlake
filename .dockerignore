@@ -58,6 +58,7 @@ random_install_files/
 *.tar.gz
 *.rar
 *.7z
+doc.md
 
 # Model checkpoints (can be large)
 *.pt

@@ -8,3 +8,6 @@
 	path = src/external_pkgs/RoboSuite
 	url = git@github.com:UBC-Snowbots/robosuite.git
 	ignore = all
+[submodule "src/external_pkgs/rlkit"]
+	path = src/external_pkgs/rlkit
+	url = https://github.com/rail-berkeley/rlkit.git

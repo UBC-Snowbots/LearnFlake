@@ -1,0 +1,50 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 1000
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    shoulder_joint_controller:
+      type: robot_joint_controller/RobotJointController
+    link_1_joint_controller:
+      type: robot_joint_controller/RobotJointController
+    link1_link2_controller:
+      type: robot_joint_controller/RobotJointController
+    a4_rotation_controller:
+      type: robot_joint_controller/RobotJointController
+    a5_rotation_controller:
+      type: robot_joint_controller/RobotJointController
+    a6_rotation_controller:
+      type: robot_joint_controller/RobotJointController
+
+shoulder_joint_controller:
+  ros__parameters:
+    joint: shoulder_joint
+    pid: {p: 100.0, i: 0.0, d: 5.0}
+
+link_1_joint_controller:
+  ros__parameters:
+    joint: link_1_joint
+    pid: {p: 120.0, i: 0.0, d: 6.0}
+
+link1_link2_controller:
+  ros__parameters:
+    joint: link1_link2
+    pid: {p: 120.0, i: 0.0, d: 6.0}
+
+a4_rotation_controller:
+  ros__parameters:
+    joint: a4_rotation
+    pid: {p: 100.0, i: 0.0, d: 5.0}
+
+a5_rotation_controller:
+  ros__parameters:
+    joint: a5_rotation
+    pid: {p: 40.0, i: 0.0, d: 2.0}
+
+a6_rotation_controller:
+  ros__parameters:
+    joint: a6_rotation
+    pid: {p: 40.0, i: 0.0, d: 2.0}
+
