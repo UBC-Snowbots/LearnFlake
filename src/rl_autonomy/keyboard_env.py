@@ -82,13 +82,15 @@ class KeyboardEnv(ManipulationEnv):
 
     def __init__(
         self,
-        keyboard_offset=(0.15, 0.0),
+        keyboard_offset=(-0.15, 0.0),
+        keyboard_height=0.15,
         render=False,
         use_camera_obs=False,
         horizon=500,
         **kwargs,
     ):
         self.keyboard_offset = np.array(keyboard_offset)
+        self.keyboard_height = keyboard_height  # top of keyboard surface (m)
 
         arm_cfg = suite.load_part_controller_config(default_controller="JOINT_VELOCITY")
         ctrl_cfg = refactor_composite_controller_config(arm_cfg, "Rover2026", ["right"])
@@ -152,7 +154,7 @@ class KeyboardEnv(ManipulationEnv):
         xpos = self.robots[0].robot_model.base_xpos_offset["empty"]
         self.robots[0].robot_model.set_base_xpos(xpos)
 
-        # Keyboard sits directly on the floor in world space
+        # Keyboard at self.keyboard_height above the floor
         keyboard_body = self._build_keyboard()
         mujoco_arena.worldbody.append(keyboard_body)
 
@@ -377,10 +379,12 @@ class KeyboardEnv(ManipulationEnv):
         Build the keyboard body tree as ElementTree elements.
         Positions are in world space:
           - floor is at z = 0
-          - keyboard_offset is the (x, y) world position of the keyboard centre
+          - keyboard sits at self.keyboard_height above the floor
         """
         kx, ky = self.keyboard_offset
-        kz = KEY_H  # keyboard base top flush with floor
+        # Place keyboard body so that the slab top surface is at keyboard_height.
+        # Slab geom has half-height KEY_H, so body centre is at keyboard_height.
+        kz = self.keyboard_height
 
         base = ET.Element("body")
         base.set("name", "keyboard_base")
@@ -402,7 +406,8 @@ class KeyboardEnv(ManipulationEnv):
 
             key_body = ET.SubElement(base, "body")
             key_body.set("name", f"key_{key_name}")
-            key_body.set("pos",  f"{x_local:.4f} 0 {KEY_H * 2:.4f}")
+            # Key sits on top of the slab: slab half-height + key half-height
+            key_body.set("pos",  f"{x_local:.4f} 0 {KEY_H * 3:.4f}")
 
             geom = ET.SubElement(key_body, "geom")
             geom.set("name",        f"key_{key_name}_geom")
@@ -428,7 +433,8 @@ class KeyboardEnv(ManipulationEnv):
 
 class CoarseReachEnv(KeyboardEnv):
     """
-    Skill 1: Move EEF to within 3 cm XY and correct height above target key.
+    Skill 1: Move EEF to within 3 cm XY and correct height above target key,
+    with the EEF oriented perfectly horizontal (solenoid pointing straight down).
 
     Actuator is locked retracted throughout — only the 6 arm joints are used.
     Episode terminates on success or after `horizon` steps (default 300).
@@ -436,38 +442,80 @@ class CoarseReachEnv(KeyboardEnv):
 
     SUCCESS_XY   = 0.03   # m — XY tolerance for success
     SUCCESS_Z    = 0.015  # m — height error tolerance
+    SUCCESS_TILT = 0.15   # rad (~8.6°) — max tilt from vertical for success
     HOVER_HEIGHT = 0.05   # m — target hover height above key surface
 
-    def __init__(self, random_key: bool = True, **kwargs):
+    # Joint config that places the EEF roughly vertical above the keyboard.
+    # Used for a fraction of resets so the agent discovers what "good" looks like.
+    ABOVE_KEYBOARD_QPOS = np.array([
+        -2.3448,  # shoulder_joint
+        -1.3110,  # link_1_joint
+         0.4222,  # link1_link2
+        -0.0107,  # a4_rotation
+         1.7332,  # a5_rotation
+         0.7774,  # a6_rotation
+    ])
+
+    def __init__(self, random_key: bool = True, easy_init_frac: float = 0.3,
+                 **kwargs):
         kwargs.setdefault('horizon', 300)
         self.random_key = random_key
+        self.easy_init_frac = easy_init_frac
         super().__init__(**kwargs)
 
     def _reset_internal(self):
+        # Before super() resets the sim, optionally override init_qpos
+        # so the arm starts near-vertical above the keyboard
+        if np.random.rand() < self.easy_init_frac:
+            robot = self.robots[0]
+            robot.init_qpos = self.ABOVE_KEYBOARD_QPOS.copy()
+            # Add small noise so it's not always identical
+            robot.init_qpos += np.random.uniform(-0.05, 0.05, size=6)
+        else:
+            # Restore default so normal episodes still train generalization
+            robot = self.robots[0]
+            robot.init_qpos = robot.robot_model.init_qpos
+
         super()._reset_internal()
         if self.random_key:
             self.set_target_key(np.random.choice(self.AVAILABLE_KEYS))
 
     def reward(self, action=None):
-        eef_pos = self.sim.data.site_xpos[self._eef_site_id]
-        key_pos = self.sim.data.body_xpos[self._key_body_ids[self._target_key]]
+        obs = self._get_observations(force_update=True)
+        pf = self.robots[0].robot_model.naming_prefix
+
+        eef_pos  = self.sim.data.site_xpos[self._eef_site_id]
+        eef_quat = obs.get(f"{pf}eef_quat", np.array([1, 0, 0, 0]))
+        key_pos  = self.sim.data.body_xpos[self._key_body_ids[self._target_key]]
 
         xy_dist = float(np.linalg.norm(eef_pos[:2] - key_pos[:2]))
         z_error = float(abs((eef_pos[2] - key_pos[2]) - self.HOVER_HEIGHT))
+        tilt    = float(self._eef_tilt_from_vertical(eef_quat))
 
-        if xy_dist < self.SUCCESS_XY and z_error < self.SUCCESS_Z:
+        # Success: position + orientation
+        if (xy_dist < self.SUCCESS_XY and z_error < self.SUCCESS_Z
+                and tilt < self.SUCCESS_TILT):
             return 100.0
 
-        r_reach  = 10.0 * np.exp(-5.0 * xy_dist)
+        # Reach: exponential for close range + linear for long range gradient
+        r_reach  = 10.0 * np.exp(-5.0 * xy_dist) - 15.0 * xy_dist
         r_height = -2.0 * z_error
-        return r_reach + r_height
+        r_orient = -3.0 * tilt
+        return r_reach + r_height + r_orient
 
     def _check_success(self):
-        eef_pos = self.sim.data.site_xpos[self._eef_site_id]
-        key_pos = self.sim.data.body_xpos[self._key_body_ids[self._target_key]]
+        obs = self._get_observations(force_update=True)
+        pf = self.robots[0].robot_model.naming_prefix
+
+        eef_pos  = self.sim.data.site_xpos[self._eef_site_id]
+        eef_quat = obs.get(f"{pf}eef_quat", np.array([1, 0, 0, 0]))
+        key_pos  = self.sim.data.body_xpos[self._key_body_ids[self._target_key]]
+
         xy_dist = float(np.linalg.norm(eef_pos[:2] - key_pos[:2]))
         z_error = float(abs((eef_pos[2] - key_pos[2]) - self.HOVER_HEIGHT))
-        return xy_dist < self.SUCCESS_XY and z_error < self.SUCCESS_Z
+        tilt    = float(self._eef_tilt_from_vertical(eef_quat))
+        return (xy_dist < self.SUCCESS_XY and z_error < self.SUCCESS_Z
+                and tilt < self.SUCCESS_TILT)
 
 
 class PressKeyEnv(KeyboardEnv):

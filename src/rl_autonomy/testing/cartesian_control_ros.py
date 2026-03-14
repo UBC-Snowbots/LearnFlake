@@ -84,6 +84,8 @@ class KeyboardBridgeNode(Node):
     ACTUATOR_TRQ_TOPIC = "/mujoco/actuator_torque"
     CONTACT_TOPIC     = "/mujoco/contact_detected"
     TARGET_KEY_TOPIC  = "/mujoco/target_key"
+    A5_TORQUE_TOPIC   = "/mujoco/a5_torque"         # synthetic Moteus id_5 torque
+    A5_DELTA_TOPIC    = "/mujoco/a5_torque_delta"    # torque - baseline = contact signal
 
     URDF_JOINT_NAMES = [
         'shoulder_joint', 'link_1_joint', 'link1_link2',
@@ -129,6 +131,17 @@ class KeyboardBridgeNode(Node):
         self.max_joint_velocities = np.array([1.0, 1.0, 0.8, 0.8, 0.8, 1.0])
         self.pos_fallback_kp = 10.0
 
+        # ---- Synthetic Moteus a5 torque ----
+        a5_mj_name = 'robot0_a5_rotation'
+        self._a5_actuator_id = sim.model.actuator_name2id(a5_mj_name)
+        # Noise parameters matching real Moteus noise floor
+        self._a5_noise_std = 0.05        # Nm, Gaussian
+        self._a5_outlier_prob = 0.01     # 1% chance of 3-sigma spike
+        self._a5_drift = 0.0            # slow drift term (temperature sim)
+        self._a5_drift_rate = 0.001     # Nm per step max drift
+        # Baseline: captured at init, updated on reset
+        self._a5_torque_baseline = float(sim.data.actuator_force[self._a5_actuator_id])
+
         # ---- Shared state ----
         self._joint_vel_cmd   = np.zeros(6, dtype=np.float64)
         self._joint_pos_target = None
@@ -151,6 +164,8 @@ class KeyboardBridgeNode(Node):
         self.act_trq_pub    = self.create_publisher(Float32, self.ACTUATOR_TRQ_TOPIC, 10)
         self.contact_pub    = self.create_publisher(Bool, self.CONTACT_TOPIC, 10)
         self.target_key_pub = self.create_publisher(String, self.TARGET_KEY_TOPIC, 10)
+        self.a5_trq_pub     = self.create_publisher(Float32, self.A5_TORQUE_TOPIC, 10)
+        self.a5_delta_pub   = self.create_publisher(Float32, self.A5_DELTA_TOPIC, 10)
 
         # ---- Subscriptions ----
         self.traj_sub    = self.create_subscription(JointTrajectory, self.TRAJECTORY_TOPIC, self._traj_cb, qos)
@@ -258,7 +273,24 @@ class KeyboardBridgeNode(Node):
             and abs(act_qvel) < STALL_VEL_THRESHOLD
         )
 
+        # ---- Synthetic Moteus a5 torque ----
+        a5_raw = float(sim.data.actuator_force[self._a5_actuator_id])
+        # Add Gaussian noise
+        noise = np.random.normal(0.0, self._a5_noise_std)
+        # Occasional outlier spike (1% chance)
+        if np.random.rand() < self._a5_outlier_prob:
+            noise += np.random.choice([-1, 1]) * 3.0 * self._a5_noise_std
+        # Slow drift (temperature simulation)
+        self._a5_drift += np.random.uniform(-self._a5_drift_rate, self._a5_drift_rate)
+        self._a5_drift = np.clip(self._a5_drift, -0.1, 0.1)
+        a5_noisy = a5_raw + noise + self._a5_drift
+        a5_delta = a5_noisy - self._a5_torque_baseline
+
         now = self.get_clock().now().to_msg()
+
+        # /mujoco/a5_torque and /mujoco/a5_torque_delta
+        self.a5_trq_pub.publish(Float32(data=a5_noisy))
+        self.a5_delta_pub.publish(Float32(data=a5_delta))
 
         # /mujoco/joint_states — 6 arm joints + solenoid
         qpos = sim.data.qpos[self._arm_qpos_addrs]
@@ -302,11 +334,17 @@ class KeyboardBridgeNode(Node):
 
         # Debug output
         if self.debug and self._step_count % 20 == 0:
-            self._print_debug(joint_vel, act_qpos, rangefinder, contact_force, contact_detected)
+            self._print_debug(joint_vel, act_qpos, rangefinder, contact_force,
+                              contact_detected, a5_raw, a5_noisy, a5_delta)
 
         if done:
             self.get_logger().info("Episode done — resetting")
             self._obs_raw = self.env.reset()
+            # Re-capture a5 torque baseline at rest pose
+            self._a5_torque_baseline = float(
+                self.env.sim.data.actuator_force[self._a5_actuator_id]
+            )
+            self._a5_drift = 0.0
 
     # ------------------------------------------------------------------
     # Helpers
@@ -333,7 +371,8 @@ class KeyboardBridgeNode(Node):
         except Exception as e:
             self.get_logger().warn(f"Camera render failed: {e}", throttle_duration_sec=5.0)
 
-    def _print_debug(self, joint_vel, act_qpos, rangefinder, contact_force, contact_detected):
+    def _print_debug(self, joint_vel, act_qpos, rangefinder, contact_force,
+                     contact_detected, a5_raw, a5_noisy, a5_delta):
         obs  = self._obs_raw
         pf   = self.env.robots[0].robot_model.naming_prefix
         eef  = np.array(obs.get(f"{pf}eef_pos", [0, 0, 0]))
@@ -341,6 +380,7 @@ class KeyboardBridgeNode(Node):
         delta = np.array(obs.get("eef_to_key", [0, 0, 0]))
         jpos  = np.array(obs.get(f"{pf}joint_pos", np.zeros(6)))
         touch_str = "YES ←" if contact_detected else "no"
+        contact_str = "CONTACT ←" if abs(a5_delta) > 0.5 else ""
         print(
             f"\n[t={self._step_count:05d}]"
             f"  EEF: [{eef[0]:.3f}, {eef[1]:.3f}, {eef[2]:.3f}]"
@@ -356,6 +396,12 @@ class KeyboardBridgeNode(Node):
             f"           Rangefinder: {rangefinder:.4f}m"
             f"  Force: {contact_force:.3f}N"
             f"  Joints: {np.round(jpos, 2).tolist()}"
+        )
+        print(
+            f"           a5 torque: raw={a5_raw:.3f}Nm  "
+            f"noisy={a5_noisy:.3f}Nm  "
+            f"Δ={a5_delta:+.3f}Nm  "
+            f"baseline={self._a5_torque_baseline:.3f}Nm  {contact_str}"
         )
 
     def destroy_node(self):

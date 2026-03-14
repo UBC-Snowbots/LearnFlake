@@ -37,6 +37,7 @@ from stable_baselines3.common.callbacks import (
     EvalCallback, CheckpointCallback, CallbackList,
 )
 from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import SubprocVecEnv
 
 from keyboard_env import CoarseReachEnv
 
@@ -85,6 +86,24 @@ class CoarseReachGymEnv(gym.Env):
         full_action = np.append(action, 0.0)   # lock solenoid retracted
         _, reward, done, info = self._env.step(full_action)
         obs = self._env._flat_obs().astype(np.float32)
+
+        # Positioning metrics
+        env = self._env
+        eef_pos  = env.sim.data.site_xpos[env._eef_site_id]
+        key_pos  = env.sim.data.body_xpos[env._key_body_ids[env._target_key]]
+        pf = env.robots[0].robot_model.naming_prefix
+        eef_quat = env._get_observations(force_update=False).get(
+            f"{pf}eef_quat", np.array([1, 0, 0, 0])
+        )
+        xy_dist = float(np.linalg.norm(eef_pos[:2] - key_pos[:2]))
+        z_error = float(abs((eef_pos[2] - key_pos[2]) - CoarseReachEnv.HOVER_HEIGHT))
+        tilt    = float(CoarseReachEnv._eef_tilt_from_vertical(eef_quat))
+
+        info['xy_dist'] = xy_dist
+        info['z_error'] = z_error
+        info['tilt_rad'] = tilt
+        info['target_key'] = env._target_key
+
         if _GYM == "gymnasium":
             return obs, float(reward), done, False, info
         return obs, float(reward), done, info
@@ -100,17 +119,23 @@ class CoarseReachGymEnv(gym.Env):
 # Training
 # ============================================================================
 
-def make_env(render: bool = False) -> gym.Env:
-    env = CoarseReachGymEnv(render=render)
-    return Monitor(env)
+def make_env(render: bool = False):
+    def _init():
+        env = CoarseReachGymEnv(render=render)
+        return Monitor(env)
+    return _init
 
 
-def train(timesteps: int, render: bool, resume_path: str | None):
+def train(timesteps: int, render: bool, resume_path: str | None, num_envs: int = 3):
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
     os.makedirs(LOG_DIR, exist_ok=True)
 
-    env      = make_env(render=render)
-    eval_env = make_env(render=False)
+    if num_envs > 1:
+        env      = SubprocVecEnv([make_env(render=False) for _ in range(num_envs)])
+        eval_env = SubprocVecEnv([make_env(render=False) for _ in range(1)])
+    else:
+        env      = make_env(render=render)()
+        eval_env = make_env(render=False)()
 
     if resume_path:
         print(f"Resuming from {resume_path}")
@@ -126,7 +151,7 @@ def train(timesteps: int, render: bool, resume_path: str | None):
             tau=0.005,
             gamma=0.99,
             train_freq=1,
-            gradient_steps=1,
+            gradient_steps=num_envs,
             verbose=1,
             tensorboard_log=LOG_DIR,
             policy_kwargs=dict(net_arch=[256, 256]),
@@ -150,9 +175,10 @@ def train(timesteps: int, render: bool, resume_path: str | None):
         ),
     ])
 
-    print(f"\nTraining CoarseReach for {timesteps:,} steps")
+    print(f"\nTraining CoarseReach for {timesteps:,} steps ({num_envs} parallel envs)")
     print(f"  obs_dim={env.observation_space.shape[0]}  "
-          f"action_dim={env.action_space.shape[0]}")
+          f"action_dim={env.action_space.shape[0]}  "
+          f"gradient_steps={num_envs}")
     print(f"  checkpoints → {CHECKPOINT_DIR}")
     print(f"  tensorboard → tensorboard --logdir {LOG_DIR}\n")
 
@@ -173,22 +199,41 @@ def evaluate(model_path: str, n_episodes: int, render: bool):
 
     model = SAC.load(model_path)
     successes = 0
+    all_xy = []
+    all_z  = []
+    all_tilt = []
 
     for ep in range(n_episodes):
         result = env.reset()
         obs = result[0] if isinstance(result, tuple) else result
         done = False
         ep_reward = 0.0
+        info = {}
         while not done:
             action, _ = model.predict(obs, deterministic=True)
             result = env.step(action)
-            obs, reward, done = result[0], result[1], result[2]
+            obs, reward, done, info = result[0], result[1], result[2], result[-1]
             ep_reward += reward
-        success = ep_reward > 50.0   # rough proxy: got the 100-pt bonus
+
+        xy  = info.get('xy_dist', float('nan'))
+        ze  = info.get('z_error', float('nan'))
+        tlt = info.get('tilt_rad', float('nan'))
+        key = info.get('target_key', '?')
+        success = env._env._check_success()
         successes += int(success)
-        print(f"  ep {ep+1:3d}/{n_episodes}  reward={ep_reward:7.1f}  {'SUCCESS' if success else 'timeout'}")
+        all_xy.append(xy)
+        all_z.append(ze)
+        all_tilt.append(tlt)
+
+        status = 'SUCCESS' if success else 'timeout'
+        print(f"  ep {ep+1:3d}/{n_episodes}  key={key}  reward={ep_reward:7.1f}  "
+              f"xy={xy*100:5.2f}cm  z_err={ze*100:5.2f}cm  tilt={np.degrees(tlt):5.1f}°  {status}")
 
     print(f"\nSuccess rate: {successes}/{n_episodes} = {100*successes/n_episodes:.1f}%")
+    print(f"Final distances (mean ± std):")
+    print(f"  XY:   {np.mean(all_xy)*100:5.2f} ± {np.std(all_xy)*100:5.2f} cm")
+    print(f"  Z:    {np.mean(all_z)*100:5.2f} ± {np.std(all_z)*100:5.2f} cm")
+    print(f"  Tilt: {np.mean(np.degrees(all_tilt)):5.1f} ± {np.std(np.degrees(all_tilt)):5.1f}°")
     env.close()
 
 
@@ -206,12 +251,15 @@ def main():
     parser.add_argument('--eval-episodes', type=int, default=50)
     parser.add_argument('--resume', type=str, default=None,
                         metavar='PATH', help='Resume training from checkpoint')
+    parser.add_argument('--num-envs', type=int, default=3,
+                        help='Number of parallel envs (default: 3)')
     args = parser.parse_args()
 
     if args.eval:
         evaluate(args.eval, args.eval_episodes, render=not args.no_render)
     else:
-        train(args.timesteps, render=not args.no_render, resume_path=args.resume)
+        train(args.timesteps, render=not args.no_render,
+              resume_path=args.resume, num_envs=args.num_envs)
 
 
 if __name__ == '__main__':
