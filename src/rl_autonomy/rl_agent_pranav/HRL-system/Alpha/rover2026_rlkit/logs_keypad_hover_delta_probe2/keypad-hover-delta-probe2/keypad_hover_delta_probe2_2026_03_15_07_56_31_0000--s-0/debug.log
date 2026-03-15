@@ -1,0 +1,1326 @@
+2026-03-15 07:56:37.749375 UTC | [keypad_hover_delta_probe2_2026_03_15_07_56_31_0000--s-0] Epoch 0 finished
+---------------------------------------------------  -------------
+replay_buffer/size                                   160
+trainer/QF1 Loss                                       7.01254
+trainer/QF2 Loss                                       7.00629
+trainer/Policy Loss                                    1.0475
+trainer/Q1 Predictions Mean                            0.00489366
+trainer/Q1 Predictions Std                             0.000772769
+trainer/Q1 Predictions Max                             0.00691393
+trainer/Q1 Predictions Min                             0.00326405
+trainer/Q2 Predictions Mean                            0.00177789
+trainer/Q2 Predictions Std                             0.00055787
+trainer/Q2 Predictions Max                             0.00354945
+trainer/Q2 Predictions Min                             0.000660137
+trainer/Q Targets Mean                                -1.0208
+trainer/Q Targets Std                                  2.44148
+trainer/Q Targets Max                                  3.54385
+trainer/Q Targets Min                                -17.6466
+trainer/Log Pis Mean                                   1.04927
+trainer/Log Pis Std                                    3.1062
+trainer/Log Pis Max                                   17.8811
+trainer/Log Pis Min                                   -6.29275
+trainer/Policy mu Mean                                 0.144858
+trainer/Policy mu Std                                  0.892712
+trainer/Policy mu Max                                  5.4019
+trainer/Policy mu Min                                 -4.86642
+trainer/Policy log std Mean                           -1.3209
+trainer/Policy log std Std                             0.3182
+trainer/Policy log std Max                             0.0156145
+trainer/Policy log std Min                            -2.41586
+trainer/Alpha                                          0.9997
+trainer/Alpha Loss                                    -0
+exploration/num steps total                          160
+exploration/num paths total                            4
+exploration/path length Mean                          40
+exploration/path length Std                            0
+exploration/path length Max                           40
+exploration/path length Min                           40
+exploration/Rewards Mean                              -0.266135
+exploration/Rewards Std                                0.120986
+exploration/Rewards Max                               -0.163056
+exploration/Rewards Min                               -0.713632
+exploration/Returns Mean                             -10.6454
+exploration/Returns Std                                0.0573947
+exploration/Returns Max                              -10.588
+exploration/Returns Min                              -10.7028
+exploration/Actions Mean                               0.0310581
+exploration/Actions Std                                0.482747
+exploration/Actions Max                                0.999987
+exploration/Actions Min                               -0.999983
+exploration/Num Paths                                  2
+exploration/Average Returns                          -10.6454
+exploration/env_infos/final/distance_to_goal Mean      0.0916987
+exploration/env_infos/final/distance_to_goal Std       0.00232462
+exploration/env_infos/final/distance_to_goal Max       0.0940234
+exploration/env_infos/final/distance_to_goal Min       0.0893741
+exploration/env_infos/initial/distance_to_goal Mean    0.346767
+exploration/env_infos/initial/distance_to_goal Std     0.00664242
+exploration/env_infos/initial/distance_to_goal Max     0.35341
+exploration/env_infos/initial/distance_to_goal Min     0.340125
+exploration/env_infos/distance_to_goal Mean            0.138991
+exploration/env_infos/distance_to_goal Std             0.0627505
+exploration/env_infos/distance_to_goal Max             0.35341
+exploration/env_infos/distance_to_goal Min             0.0820732
+exploration/env_infos/final/standoff_error Mean        0.0916987
+exploration/env_infos/final/standoff_error Std         0.00232462
+exploration/env_infos/final/standoff_error Max         0.0940234
+exploration/env_infos/final/standoff_error Min         0.0893741
+exploration/env_infos/initial/standoff_error Mean      0.346767
+exploration/env_infos/initial/standoff_error Std       0.00664242
+exploration/env_infos/initial/standoff_error Max       0.35341
+exploration/env_infos/initial/standoff_error Min       0.340125
+exploration/env_infos/standoff_error Mean              0.138991
+exploration/env_infos/standoff_error Std               0.0627505
+exploration/env_infos/standoff_error Max               0.35341
+exploration/env_infos/standoff_error Min               0.0820732
+exploration/env_infos/final/is_success Mean            0
+exploration/env_infos/final/is_success Std             0
+exploration/env_infos/final/is_success Max             0
+exploration/env_infos/final/is_success Min             0
+exploration/env_infos/initial/is_success Mean          0
+exploration/env_infos/initial/is_success Std           0
+exploration/env_infos/initial/is_success Max           0
+exploration/env_infos/initial/is_success Min           0
+exploration/env_infos/is_success Mean                  0
+exploration/env_infos/is_success Std                   0
+exploration/env_infos/is_success Max                   0
+exploration/env_infos/is_success Min                   0
+exploration/env_infos/final/hover_locked Mean          0
+exploration/env_infos/final/hover_locked Std           0
+exploration/env_infos/final/hover_locked Max           0
+exploration/env_infos/final/hover_locked Min           0
+exploration/env_infos/initial/hover_locked Mean        0
+exploration/env_infos/initial/hover_locked Std         0
+exploration/env_infos/initial/hover_locked Max         0
+exploration/env_infos/initial/hover_locked Min         0
+exploration/env_infos/hover_locked Mean                0
+exploration/env_infos/hover_locked Std                 0
+exploration/env_infos/hover_locked Max                 0
+exploration/env_infos/hover_locked Min                 0
+exploration/env_infos/final/press_success Mean         0
+exploration/env_infos/final/press_success Std          0
+exploration/env_infos/final/press_success Max          0
+exploration/env_infos/final/press_success Min          0
+exploration/env_infos/initial/press_success Mean       0
+exploration/env_infos/initial/press_success Std        0
+exploration/env_infos/initial/press_success Max        0
+exploration/env_infos/initial/press_success Min        0
+exploration/env_infos/press_success Mean               0
+exploration/env_infos/press_success Std                0
+exploration/env_infos/press_success Max                0
+exploration/env_infos/press_success Min                0
+exploration/env_infos/final/hover_xy_error Mean        0.0527682
+exploration/env_infos/final/hover_xy_error Std         0.00566878
+exploration/env_infos/final/hover_xy_error Max         0.058437
+exploration/env_infos/final/hover_xy_error Min         0.0470995
+exploration/env_infos/initial/hover_xy_error Mean      0.184605
+exploration/env_infos/initial/hover_xy_error Std       0.00619747
+exploration/env_infos/initial/hover_xy_error Max       0.190802
+exploration/env_infos/initial/hover_xy_error Min       0.178407
+exploration/env_infos/hover_xy_error Mean              0.0604507
+exploration/env_infos/hover_xy_error Std               0.0318218
+exploration/env_infos/hover_xy_error Max               0.190802
+exploration/env_infos/hover_xy_error Min               0.0288036
+exploration/env_infos/final/hover_z_error Mean         0.0748072
+exploration/env_infos/final/hover_z_error Std          0.00114918
+exploration/env_infos/final/hover_z_error Max          0.0759564
+exploration/env_infos/final/hover_z_error Min          0.073658
+exploration/env_infos/initial/hover_z_error Mean       0.293319
+exploration/env_infos/initial/hover_z_error Std        0.0117533
+exploration/env_infos/initial/hover_z_error Max        0.305072
+exploration/env_infos/initial/hover_z_error Min        0.281566
+exploration/env_infos/hover_z_error Mean               0.123707
+exploration/env_infos/hover_z_error Std                0.057322
+exploration/env_infos/hover_z_error Max                0.305072
+exploration/env_infos/hover_z_error Min                0.0662871
+exploration/env_infos/final/press_distance Mean        0.117474
+exploration/env_infos/final/press_distance Std         0.0015211
+exploration/env_infos/final/press_distance Max         0.118995
+exploration/env_infos/final/press_distance Min         0.115953
+exploration/env_infos/initial/press_distance Mean      0.372478
+exploration/env_infos/initial/press_distance Std       0.00713053
+exploration/env_infos/initial/press_distance Max       0.379609
+exploration/env_infos/initial/press_distance Min       0.365348
+exploration/env_infos/press_distance Mean              0.16618
+exploration/env_infos/press_distance Std               0.0629509
+exploration/env_infos/press_distance Max               0.379609
+exploration/env_infos/press_distance Min               0.107765
+exploration/env_infos/final/press_xy_error Mean        0.0527682
+exploration/env_infos/final/press_xy_error Std         0.00566878
+exploration/env_infos/final/press_xy_error Max         0.058437
+exploration/env_infos/final/press_xy_error Min         0.0470995
+exploration/env_infos/initial/press_xy_error Mean      0.184605
+exploration/env_infos/initial/press_xy_error Std       0.00619747
+exploration/env_infos/initial/press_xy_error Max       0.190802
+exploration/env_infos/initial/press_xy_error Min       0.178407
+exploration/env_infos/press_xy_error Mean              0.0604507
+exploration/env_infos/press_xy_error Std               0.0318218
+exploration/env_infos/press_xy_error Max               0.190802
+exploration/env_infos/press_xy_error Min               0.0288036
+exploration/env_infos/final/press_z_error Mean         0.104807
+exploration/env_infos/final/press_z_error Std          0.00114918
+exploration/env_infos/final/press_z_error Max          0.105956
+exploration/env_infos/final/press_z_error Min          0.103658
+exploration/env_infos/initial/press_z_error Mean       0.323319
+exploration/env_infos/initial/press_z_error Std        0.0117533
+exploration/env_infos/initial/press_z_error Max        0.335072
+exploration/env_infos/initial/press_z_error Min        0.311566
+exploration/env_infos/press_z_error Mean               0.153707
+exploration/env_infos/press_z_error Std                0.057322
+exploration/env_infos/press_z_error Max                0.335072
+exploration/env_infos/press_z_error Min                0.0962871
+exploration/env_infos/final/target_xyz Mean            0.309333
+exploration/env_infos/final/target_xyz Std             0.392769
+exploration/env_infos/final/target_xyz Max             0.858
+exploration/env_infos/final/target_xyz Min            -0.04
+exploration/env_infos/initial/target_xyz Mean          0.309333
+exploration/env_infos/initial/target_xyz Std           0.392769
+exploration/env_infos/initial/target_xyz Max           0.858
+exploration/env_infos/initial/target_xyz Min          -0.04
+exploration/env_infos/target_xyz Mean                  0.309333
+exploration/env_infos/target_xyz Std                   0.392769
+exploration/env_infos/target_xyz Max                   0.858
+exploration/env_infos/target_xyz Min                  -0.04
+exploration/env_infos/final/hover_target_xyz Mean      0.309333
+exploration/env_infos/final/hover_target_xyz Std       0.392769
+exploration/env_infos/final/hover_target_xyz Max       0.858
+exploration/env_infos/final/hover_target_xyz Min      -0.04
+exploration/env_infos/initial/hover_target_xyz Mean    0.309333
+exploration/env_infos/initial/hover_target_xyz Std     0.392769
+exploration/env_infos/initial/hover_target_xyz Max     0.858
+exploration/env_infos/initial/hover_target_xyz Min    -0.04
+exploration/env_infos/hover_target_xyz Mean            0.309333
+exploration/env_infos/hover_target_xyz Std             0.392769
+exploration/env_infos/hover_target_xyz Max             0.858
+exploration/env_infos/hover_target_xyz Min            -0.04
+exploration/env_infos/final/press_target_xyz Mean      0.299333
+exploration/env_infos/final/press_target_xyz Std       0.378806
+exploration/env_infos/final/press_target_xyz Max       0.828
+exploration/env_infos/final/press_target_xyz Min      -0.04
+exploration/env_infos/initial/press_target_xyz Mean    0.299333
+exploration/env_infos/initial/press_target_xyz Std     0.378806
+exploration/env_infos/initial/press_target_xyz Max     0.828
+exploration/env_infos/initial/press_target_xyz Min    -0.04
+exploration/env_infos/press_target_xyz Mean            0.299333
+exploration/env_infos/press_target_xyz Std             0.378806
+exploration/env_infos/press_target_xyz Max             0.828
+exploration/env_infos/press_target_xyz Min            -0.04
+exploration/env_infos/final/target_key_id Mean         0
+exploration/env_infos/final/target_key_id Std          0
+exploration/env_infos/final/target_key_id Max          0
+exploration/env_infos/final/target_key_id Min          0
+exploration/env_infos/initial/target_key_id Mean       0
+exploration/env_infos/initial/target_key_id Std        0
+exploration/env_infos/initial/target_key_id Max        0
+exploration/env_infos/initial/target_key_id Min        0
+exploration/env_infos/target_key_id Mean               0
+exploration/env_infos/target_key_id Std                0
+exploration/env_infos/target_key_id Max                0
+exploration/env_infos/target_key_id Min                0
+exploration/env_infos/final/eef_xyz Mean               0.355111
+exploration/env_infos/final/eef_xyz Std                0.415861
+exploration/env_infos/final/eef_xyz Max                0.933956
+exploration/env_infos/final/eef_xyz Min               -0.0301393
+exploration/env_infos/initial/eef_xyz Mean             0.48893
+exploration/env_infos/initial/eef_xyz Std              0.478301
+exploration/env_infos/initial/eef_xyz Max              1.16307
+exploration/env_infos/initial/eef_xyz Min              0.0215073
+exploration/env_infos/eef_xyz Mean                     0.37415
+exploration/env_infos/eef_xyz Std                      0.438561
+exploration/env_infos/eef_xyz Max                      1.16307
+exploration/env_infos/eef_xyz Min                     -0.0634016
+evaluation/num steps total                            80
+evaluation/num paths total                             2
+evaluation/path length Mean                           40
+evaluation/path length Std                             0
+evaluation/path length Max                            40
+evaluation/path length Min                            40
+evaluation/Rewards Mean                               -0.258387
+evaluation/Rewards Std                                 0.118199
+evaluation/Rewards Max                                -0.194838
+evaluation/Rewards Min                                -0.728272
+evaluation/Returns Mean                              -10.3355
+evaluation/Returns Std                                 0.222948
+evaluation/Returns Max                               -10.1125
+evaluation/Returns Min                               -10.5584
+evaluation/Actions Mean                                0.028275
+evaluation/Actions Std                                 0.310291
+evaluation/Actions Max                                 0.999951
+evaluation/Actions Min                                -0.999808
+evaluation/Num Paths                                   2
+evaluation/Average Returns                           -10.3355
+evaluation/env_infos/final/distance_to_goal Mean       0.0946059
+evaluation/env_infos/final/distance_to_goal Std        0.000848033
+evaluation/env_infos/final/distance_to_goal Max        0.095454
+evaluation/env_infos/final/distance_to_goal Min        0.0937579
+evaluation/env_infos/initial/distance_to_goal Mean     0.353183
+evaluation/env_infos/initial/distance_to_goal Std      0.0163959
+evaluation/env_infos/initial/distance_to_goal Max      0.369579
+evaluation/env_infos/initial/distance_to_goal Min      0.336787
+evaluation/env_infos/distance_to_goal Mean             0.137513
+evaluation/env_infos/distance_to_goal Std              0.0652221
+evaluation/env_infos/distance_to_goal Max              0.369579
+evaluation/env_infos/distance_to_goal Min              0.0937579
+evaluation/env_infos/final/standoff_error Mean         0.0946059
+evaluation/env_infos/final/standoff_error Std          0.000848033
+evaluation/env_infos/final/standoff_error Max          0.095454
+evaluation/env_infos/final/standoff_error Min          0.0937579
+evaluation/env_infos/initial/standoff_error Mean       0.353183
+evaluation/env_infos/initial/standoff_error Std        0.0163959
+evaluation/env_infos/initial/standoff_error Max        0.369579
+evaluation/env_infos/initial/standoff_error Min        0.336787
+evaluation/env_infos/standoff_error Mean               0.137513
+evaluation/env_infos/standoff_error Std                0.0652221
+evaluation/env_infos/standoff_error Max                0.369579
+evaluation/env_infos/standoff_error Min                0.0937579
+evaluation/env_infos/final/is_success Mean             0
+evaluation/env_infos/final/is_success Std              0
+evaluation/env_infos/final/is_success Max              0
+evaluation/env_infos/final/is_success Min              0
+evaluation/env_infos/initial/is_success Mean           0
+evaluation/env_infos/initial/is_success Std            0
+evaluation/env_infos/initial/is_success Max            0
+evaluation/env_infos/initial/is_success Min            0
+evaluation/env_infos/is_success Mean                   0
+evaluation/env_infos/is_success Std                    0
+evaluation/env_infos/is_success Max                    0
+evaluation/env_infos/is_success Min                    0
+evaluation/env_infos/final/hover_locked Mean           0
+evaluation/env_infos/final/hover_locked Std            0
+evaluation/env_infos/final/hover_locked Max            0
+evaluation/env_infos/final/hover_locked Min            0
+evaluation/env_infos/initial/hover_locked Mean         0
+evaluation/env_infos/initial/hover_locked Std          0
+evaluation/env_infos/initial/hover_locked Max          0
+evaluation/env_infos/initial/hover_locked Min          0
+evaluation/env_infos/hover_locked Mean                 0
+evaluation/env_infos/hover_locked Std                  0
+evaluation/env_infos/hover_locked Max                  0
+evaluation/env_infos/hover_locked Min                  0
+evaluation/env_infos/final/press_success Mean          0
+evaluation/env_infos/final/press_success Std           0
+evaluation/env_infos/final/press_success Max           0
+evaluation/env_infos/final/press_success Min           0
+evaluation/env_infos/initial/press_success Mean        0
+evaluation/env_infos/initial/press_success Std         0
+evaluation/env_infos/initial/press_success Max         0
+evaluation/env_infos/initial/press_success Min         0
+evaluation/env_infos/press_success Mean                0
+evaluation/env_infos/press_success Std                 0
+evaluation/env_infos/press_success Max                 0
+evaluation/env_infos/press_success Min                 0
+evaluation/env_infos/final/hover_xy_error Mean         0.0549388
+evaluation/env_infos/final/hover_xy_error Std          0.000322787
+evaluation/env_infos/final/hover_xy_error Max          0.0552616
+evaluation/env_infos/final/hover_xy_error Min          0.054616
+evaluation/env_infos/initial/hover_xy_error Mean       0.165503
+evaluation/env_infos/initial/hover_xy_error Std        0.00907847
+evaluation/env_infos/initial/hover_xy_error Max        0.174581
+evaluation/env_infos/initial/hover_xy_error Min        0.156424
+evaluation/env_infos/hover_xy_error Mean               0.0596215
+evaluation/env_infos/hover_xy_error Std                0.0262117
+evaluation/env_infos/hover_xy_error Max                0.174581
+evaluation/env_infos/hover_xy_error Min                0.0338587
+evaluation/env_infos/final/hover_z_error Mean          0.0770192
+evaluation/env_infos/final/hover_z_error Std           0.000811428
+evaluation/env_infos/final/hover_z_error Max           0.0778307
+evaluation/env_infos/final/hover_z_error Min           0.0762078
+evaluation/env_infos/initial/hover_z_error Mean        0.312001
+evaluation/env_infos/initial/hover_z_error Std         0.0137444
+evaluation/env_infos/initial/hover_z_error Max         0.325745
+evaluation/env_infos/initial/hover_z_error Min         0.298256
+evaluation/env_infos/hover_z_error Mean                0.12272
+evaluation/env_infos/hover_z_error Std                 0.0621432
+evaluation/env_infos/hover_z_error Max                 0.325745
+evaluation/env_infos/hover_z_error Min                 0.0762078
+evaluation/env_infos/final/press_distance Mean         0.120297
+evaluation/env_infos/final/press_distance Std          0.000869278
+evaluation/env_infos/final/press_distance Max          0.121166
+evaluation/env_infos/final/press_distance Min          0.119428
+evaluation/env_infos/initial/press_distance Mean       0.379948
+evaluation/env_infos/initial/press_distance Std        0.0163262
+evaluation/env_infos/initial/press_distance Max        0.396274
+evaluation/env_infos/initial/press_distance Min        0.363622
+evaluation/env_infos/press_distance Mean               0.164636
+evaluation/env_infos/press_distance Std                0.0657435
+evaluation/env_infos/press_distance Max                0.396274
+evaluation/env_infos/press_distance Min                0.119428
+evaluation/env_infos/final/press_xy_error Mean         0.0549388
+evaluation/env_infos/final/press_xy_error Std          0.000322787
+evaluation/env_infos/final/press_xy_error Max          0.0552616
+evaluation/env_infos/final/press_xy_error Min          0.054616
+evaluation/env_infos/initial/press_xy_error Mean       0.165503
+evaluation/env_infos/initial/press_xy_error Std        0.00907847
+evaluation/env_infos/initial/press_xy_error Max        0.174581
+evaluation/env_infos/initial/press_xy_error Min        0.156424
+evaluation/env_infos/press_xy_error Mean               0.0596215
+evaluation/env_infos/press_xy_error Std                0.0262117
+evaluation/env_infos/press_xy_error Max                0.174581
+evaluation/env_infos/press_xy_error Min                0.0338587
+evaluation/env_infos/final/press_z_error Mean          0.107019
+evaluation/env_infos/final/press_z_error Std           0.000811428
+evaluation/env_infos/final/press_z_error Max           0.107831
+evaluation/env_infos/final/press_z_error Min           0.106208
+evaluation/env_infos/initial/press_z_error Mean        0.342001
+evaluation/env_infos/initial/press_z_error Std         0.0137444
+evaluation/env_infos/initial/press_z_error Max         0.355745
+evaluation/env_infos/initial/press_z_error Min         0.328256
+evaluation/env_infos/press_z_error Mean                0.15272
+evaluation/env_infos/press_z_error Std                 0.0621432
+evaluation/env_infos/press_z_error Max                 0.355745
+evaluation/env_infos/press_z_error Min                 0.106208
+evaluation/env_infos/final/target_xyz Mean             0.309333
+evaluation/env_infos/final/target_xyz Std              0.392769
+evaluation/env_infos/final/target_xyz Max              0.858
+evaluation/env_infos/final/target_xyz Min             -0.04
+evaluation/env_infos/initial/target_xyz Mean           0.309333
+evaluation/env_infos/initial/target_xyz Std            0.392769
+evaluation/env_infos/initial/target_xyz Max            0.858
+evaluation/env_infos/initial/target_xyz Min           -0.04
+evaluation/env_infos/target_xyz Mean                   0.309333
+evaluation/env_infos/target_xyz Std                    0.392769
+evaluation/env_infos/target_xyz Max                    0.858
+evaluation/env_infos/target_xyz Min                   -0.04
+evaluation/env_infos/final/hover_target_xyz Mean       0.309333
+evaluation/env_infos/final/hover_target_xyz Std        0.392769
+evaluation/env_infos/final/hover_target_xyz Max        0.858
+evaluation/env_infos/final/hover_target_xyz Min       -0.04
+evaluation/env_infos/initial/hover_target_xyz Mean     0.309333
+evaluation/env_infos/initial/hover_target_xyz Std      0.392769
+evaluation/env_infos/initial/hover_target_xyz Max      0.858
+evaluation/env_infos/initial/hover_target_xyz Min     -0.04
+evaluation/env_infos/hover_target_xyz Mean             0.309333
+evaluation/env_infos/hover_target_xyz Std              0.392769
+evaluation/env_infos/hover_target_xyz Max              0.858
+evaluation/env_infos/hover_target_xyz Min             -0.04
+evaluation/env_infos/final/press_target_xyz Mean       0.299333
+evaluation/env_infos/final/press_target_xyz Std        0.378806
+evaluation/env_infos/final/press_target_xyz Max        0.828
+evaluation/env_infos/final/press_target_xyz Min       -0.04
+evaluation/env_infos/initial/press_target_xyz Mean     0.299333
+evaluation/env_infos/initial/press_target_xyz Std      0.378806
+evaluation/env_infos/initial/press_target_xyz Max      0.828
+evaluation/env_infos/initial/press_target_xyz Min     -0.04
+evaluation/env_infos/press_target_xyz Mean             0.299333
+evaluation/env_infos/press_target_xyz Std              0.378806
+evaluation/env_infos/press_target_xyz Max              0.828
+evaluation/env_infos/press_target_xyz Min             -0.04
+evaluation/env_infos/final/target_key_id Mean          0
+evaluation/env_infos/final/target_key_id Std           0
+evaluation/env_infos/final/target_key_id Max           0
+evaluation/env_infos/final/target_key_id Min           0
+evaluation/env_infos/initial/target_key_id Mean        0
+evaluation/env_infos/initial/target_key_id Std         0
+evaluation/env_infos/initial/target_key_id Max         0
+evaluation/env_infos/initial/target_key_id Min         0
+evaluation/env_infos/target_key_id Mean                0
+evaluation/env_infos/target_key_id Std                 0
+evaluation/env_infos/target_key_id Max                 0
+evaluation/env_infos/target_key_id Min                 0
+evaluation/env_infos/final/eef_xyz Mean                0.355711
+evaluation/env_infos/final/eef_xyz Std                 0.417427
+evaluation/env_infos/final/eef_xyz Max                 0.935831
+evaluation/env_infos/final/eef_xyz Min                -0.0334568
+evaluation/env_infos/initial/eef_xyz Mean              0.484313
+evaluation/env_infos/initial/eef_xyz Std               0.495316
+evaluation/env_infos/initial/eef_xyz Max               1.18375
+evaluation/env_infos/initial/eef_xyz Min               0.00946284
+evaluation/env_infos/eef_xyz Mean                      0.372883
+evaluation/env_infos/eef_xyz Std                       0.439152
+evaluation/env_infos/eef_xyz Max                       1.18375
+evaluation/env_infos/eef_xyz Min                      -0.0555749
+time/data storing (s)                                  0.000193284
+time/evaluation sampling (s)                           1.46154
+time/exploration sampling (s)                          1.43737
+time/logging (s)                                       0.00951898
+time/saving (s)                                        6.5279e-05
+time/training (s)                                      1.09029
+time/epoch (s)                                         3.99898
+time/total (s)                                        17.9036
+Epoch                                                  0
+---------------------------------------------------  -------------
+2026-03-15 07:56:43.065872 UTC | [keypad_hover_delta_probe2_2026_03_15_07_56_31_0000--s-0] Epoch 1 finished
+---------------------------------------------------  -------------
+replay_buffer/size                                   240
+trainer/QF1 Loss                                       1.55761
+trainer/QF2 Loss                                       1.70992
+trainer/Policy Loss                                   -2.0383
+trainer/Q1 Predictions Mean                            0.276465
+trainer/Q1 Predictions Std                             0.00397324
+trainer/Q1 Predictions Max                             0.29019
+trainer/Q1 Predictions Min                             0.269185
+trainer/Q2 Predictions Mean                            0.20623
+trainer/Q2 Predictions Std                             0.00395421
+trainer/Q2 Predictions Max                             0.221912
+trainer/Q2 Predictions Min                             0.200509
+trainer/Q Targets Mean                                 1.326
+trainer/Q Targets Std                                  0.675242
+trainer/Q Targets Max                                  3.03011
+trainer/Q Targets Min                                 -2.46281
+trainer/Log Pis Mean                                  -1.832
+trainer/Log Pis Std                                    0.75358
+trainer/Log Pis Max                                    0.935154
+trainer/Log Pis Min                                   -4.60459
+trainer/Policy mu Mean                                -0.040222
+trainer/Policy mu Std                                  0.291746
+trainer/Policy mu Max                                  0.961889
+trainer/Policy mu Min                                 -1.56194
+trainer/Policy log std Mean                           -0.239233
+trainer/Policy log std Std                             0.146768
+trainer/Policy log std Max                             0.129234
+trainer/Policy log std Min                            -0.678803
+trainer/Alpha                                          0.983299
+trainer/Alpha Loss                                    -0.0797357
+exploration/num steps total                          240
+exploration/num paths total                            6
+exploration/path length Mean                          40
+exploration/path length Std                            0
+exploration/path length Max                           40
+exploration/path length Min                           40
+exploration/Rewards Mean                              -0.493703
+exploration/Rewards Std                                0.118994
+exploration/Rewards Max                               -0.308888
+exploration/Rewards Min                               -0.800575
+exploration/Returns Mean                             -19.7481
+exploration/Returns Std                                0.485042
+exploration/Returns Max                              -19.2631
+exploration/Returns Min                              -20.2331
+exploration/Actions Mean                               0.0105344
+exploration/Actions Std                                0.561855
+exploration/Actions Max                                0.993911
+exploration/Actions Min                               -0.989971
+exploration/Num Paths                                  2
+exploration/Average Returns                          -19.7481
+exploration/env_infos/final/distance_to_goal Mean      0.162309
+exploration/env_infos/final/distance_to_goal Std       0.012886
+exploration/env_infos/final/distance_to_goal Max       0.175195
+exploration/env_infos/final/distance_to_goal Min       0.149423
+exploration/env_infos/initial/distance_to_goal Mean    0.386369
+exploration/env_infos/initial/distance_to_goal Std     0.00995317
+exploration/env_infos/initial/distance_to_goal Max     0.396322
+exploration/env_infos/initial/distance_to_goal Min     0.376416
+exploration/env_infos/distance_to_goal Mean            0.224727
+exploration/env_infos/distance_to_goal Std             0.0648145
+exploration/env_infos/distance_to_goal Max             0.396322
+exploration/env_infos/distance_to_goal Min             0.135213
+exploration/env_infos/final/standoff_error Mean        0.162309
+exploration/env_infos/final/standoff_error Std         0.012886
+exploration/env_infos/final/standoff_error Max         0.175195
+exploration/env_infos/final/standoff_error Min         0.149423
+exploration/env_infos/initial/standoff_error Mean      0.386369
+exploration/env_infos/initial/standoff_error Std       0.00995317
+exploration/env_infos/initial/standoff_error Max       0.396322
+exploration/env_infos/initial/standoff_error Min       0.376416
+exploration/env_infos/standoff_error Mean              0.224727
+exploration/env_infos/standoff_error Std               0.0648145
+exploration/env_infos/standoff_error Max               0.396322
+exploration/env_infos/standoff_error Min               0.135213
+exploration/env_infos/final/is_success Mean            0
+exploration/env_infos/final/is_success Std             0
+exploration/env_infos/final/is_success Max             0
+exploration/env_infos/final/is_success Min             0
+exploration/env_infos/initial/is_success Mean          0
+exploration/env_infos/initial/is_success Std           0
+exploration/env_infos/initial/is_success Max           0
+exploration/env_infos/initial/is_success Min           0
+exploration/env_infos/is_success Mean                  0
+exploration/env_infos/is_success Std                   0
+exploration/env_infos/is_success Max                   0
+exploration/env_infos/is_success Min                   0
+exploration/env_infos/final/hover_locked Mean          0
+exploration/env_infos/final/hover_locked Std           0
+exploration/env_infos/final/hover_locked Max           0
+exploration/env_infos/final/hover_locked Min           0
+exploration/env_infos/initial/hover_locked Mean        0
+exploration/env_infos/initial/hover_locked Std         0
+exploration/env_infos/initial/hover_locked Max         0
+exploration/env_infos/initial/hover_locked Min         0
+exploration/env_infos/hover_locked Mean                0
+exploration/env_infos/hover_locked Std                 0
+exploration/env_infos/hover_locked Max                 0
+exploration/env_infos/hover_locked Min                 0
+exploration/env_infos/final/press_success Mean         0
+exploration/env_infos/final/press_success Std          0
+exploration/env_infos/final/press_success Max          0
+exploration/env_infos/final/press_success Min          0
+exploration/env_infos/initial/press_success Mean       0
+exploration/env_infos/initial/press_success Std        0
+exploration/env_infos/initial/press_success Max        0
+exploration/env_infos/initial/press_success Min        0
+exploration/env_infos/press_success Mean               0
+exploration/env_infos/press_success Std                0
+exploration/env_infos/press_success Max                0
+exploration/env_infos/press_success Min                0
+exploration/env_infos/final/hover_xy_error Mean        0.105636
+exploration/env_infos/final/hover_xy_error Std         0.0376309
+exploration/env_infos/final/hover_xy_error Max         0.143267
+exploration/env_infos/final/hover_xy_error Min         0.0680048
+exploration/env_infos/initial/hover_xy_error Mean      0.203172
+exploration/env_infos/initial/hover_xy_error Std       0.00375387
+exploration/env_infos/initial/hover_xy_error Max       0.206926
+exploration/env_infos/initial/hover_xy_error Min       0.199418
+exploration/env_infos/hover_xy_error Mean              0.153546
+exploration/env_infos/hover_xy_error Std               0.0313083
+exploration/env_infos/hover_xy_error Max               0.206926
+exploration/env_infos/hover_xy_error Min               0.0620064
+exploration/env_infos/final/hover_z_error Mean         0.101953
+exploration/env_infos/final/hover_z_error Std          0.0595048
+exploration/env_infos/final/hover_z_error Max          0.161457
+exploration/env_infos/final/hover_z_error Min          0.0424477
+exploration/env_infos/initial/hover_z_error Mean       0.328632
+exploration/env_infos/initial/hover_z_error Std        0.00938106
+exploration/env_infos/initial/hover_z_error Max        0.338013
+exploration/env_infos/initial/hover_z_error Min        0.319251
+exploration/env_infos/hover_z_error Mean               0.154786
+exploration/env_infos/hover_z_error Std                0.0786639
+exploration/env_infos/hover_z_error Max                0.338013
+exploration/env_infos/hover_z_error Min                0.0387849
+exploration/env_infos/final/press_distance Mean        0.181859
+exploration/env_infos/final/press_distance Std         0.0213167
+exploration/env_infos/final/press_distance Max         0.203176
+exploration/env_infos/final/press_distance Min         0.160543
+exploration/env_infos/initial/press_distance Mean      0.412186
+exploration/env_infos/initial/press_distance Std       0.0100125
+exploration/env_infos/initial/press_distance Max       0.422199
+exploration/env_infos/initial/press_distance Min       0.402174
+exploration/env_infos/press_distance Mean              0.245513
+exploration/env_infos/press_distance Std               0.0679242
+exploration/env_infos/press_distance Max               0.422199
+exploration/env_infos/press_distance Min               0.147127
+exploration/env_infos/final/press_xy_error Mean        0.105636
+exploration/env_infos/final/press_xy_error Std         0.0376309
+exploration/env_infos/final/press_xy_error Max         0.143267
+exploration/env_infos/final/press_xy_error Min         0.0680048
+exploration/env_infos/initial/press_xy_error Mean      0.203172
+exploration/env_infos/initial/press_xy_error Std       0.00375387
+exploration/env_infos/initial/press_xy_error Max       0.206926
+exploration/env_infos/initial/press_xy_error Min       0.199418
+exploration/env_infos/press_xy_error Mean              0.153546
+exploration/env_infos/press_xy_error Std               0.0313083
+exploration/env_infos/press_xy_error Max               0.206926
+exploration/env_infos/press_xy_error Min               0.0620064
+exploration/env_infos/final/press_z_error Mean         0.131952
+exploration/env_infos/final/press_z_error Std          0.0595048
+exploration/env_infos/final/press_z_error Max          0.191457
+exploration/env_infos/final/press_z_error Min          0.0724477
+exploration/env_infos/initial/press_z_error Mean       0.358632
+exploration/env_infos/initial/press_z_error Std        0.00938106
+exploration/env_infos/initial/press_z_error Max        0.368013
+exploration/env_infos/initial/press_z_error Min        0.349251
+exploration/env_infos/press_z_error Mean               0.184785
+exploration/env_infos/press_z_error Std                0.0786639
+exploration/env_infos/press_z_error Max                0.368013
+exploration/env_infos/press_z_error Min                0.0687848
+exploration/env_infos/final/target_xyz Mean            0.309333
+exploration/env_infos/final/target_xyz Std             0.392769
+exploration/env_infos/final/target_xyz Max             0.858
+exploration/env_infos/final/target_xyz Min            -0.04
+exploration/env_infos/initial/target_xyz Mean          0.309333
+exploration/env_infos/initial/target_xyz Std           0.392769
+exploration/env_infos/initial/target_xyz Max           0.858
+exploration/env_infos/initial/target_xyz Min          -0.04
+exploration/env_infos/target_xyz Mean                  0.309333
+exploration/env_infos/target_xyz Std                   0.392769
+exploration/env_infos/target_xyz Max                   0.858
+exploration/env_infos/target_xyz Min                  -0.04
+exploration/env_infos/final/hover_target_xyz Mean      0.309333
+exploration/env_infos/final/hover_target_xyz Std       0.392769
+exploration/env_infos/final/hover_target_xyz Max       0.858
+exploration/env_infos/final/hover_target_xyz Min      -0.04
+exploration/env_infos/initial/hover_target_xyz Mean    0.309333
+exploration/env_infos/initial/hover_target_xyz Std     0.392769
+exploration/env_infos/initial/hover_target_xyz Max     0.858
+exploration/env_infos/initial/hover_target_xyz Min    -0.04
+exploration/env_infos/hover_target_xyz Mean            0.309333
+exploration/env_infos/hover_target_xyz Std             0.392769
+exploration/env_infos/hover_target_xyz Max             0.858
+exploration/env_infos/hover_target_xyz Min            -0.04
+exploration/env_infos/final/press_target_xyz Mean      0.299333
+exploration/env_infos/final/press_target_xyz Std       0.378806
+exploration/env_infos/final/press_target_xyz Max       0.828
+exploration/env_infos/final/press_target_xyz Min      -0.04
+exploration/env_infos/initial/press_target_xyz Mean    0.299333
+exploration/env_infos/initial/press_target_xyz Std     0.378806
+exploration/env_infos/initial/press_target_xyz Max     0.828
+exploration/env_infos/initial/press_target_xyz Min    -0.04
+exploration/env_infos/press_target_xyz Mean            0.299333
+exploration/env_infos/press_target_xyz Std             0.378806
+exploration/env_infos/press_target_xyz Max             0.828
+exploration/env_infos/press_target_xyz Min            -0.04
+exploration/env_infos/final/target_key_id Mean         0
+exploration/env_infos/final/target_key_id Std          0
+exploration/env_infos/final/target_key_id Max          0
+exploration/env_infos/final/target_key_id Min          0
+exploration/env_infos/initial/target_key_id Mean       0
+exploration/env_infos/initial/target_key_id Std        0
+exploration/env_infos/initial/target_key_id Max        0
+exploration/env_infos/initial/target_key_id Min        0
+exploration/env_infos/target_key_id Mean               0
+exploration/env_infos/target_key_id Std                0
+exploration/env_infos/target_key_id Max                0
+exploration/env_infos/target_key_id Min                0
+exploration/env_infos/final/eef_xyz Mean               0.3879
+exploration/env_infos/final/eef_xyz Std                0.415996
+exploration/env_infos/final/eef_xyz Max                1.01946
+exploration/env_infos/final/eef_xyz Min               -0.0244814
+exploration/env_infos/initial/eef_xyz Mean             0.510868
+exploration/env_infos/initial/eef_xyz Std              0.486935
+exploration/env_infos/initial/eef_xyz Max              1.19601
+exploration/env_infos/initial/eef_xyz Min              0.0475872
+exploration/env_infos/eef_xyz Mean                     0.418342
+exploration/env_infos/eef_xyz Std                      0.438027
+exploration/env_infos/eef_xyz Max                      1.19601
+exploration/env_infos/eef_xyz Min                     -0.0695421
+evaluation/num steps total                           160
+evaluation/num paths total                             4
+evaluation/path length Mean                           40
+evaluation/path length Std                             0
+evaluation/path length Max                            40
+evaluation/path length Min                            40
+evaluation/Rewards Mean                               -0.42438
+evaluation/Rewards Std                                 0.11694
+evaluation/Rewards Max                                -0.319356
+evaluation/Rewards Min                                -0.782427
+evaluation/Returns Mean                              -16.9752
+evaluation/Returns Std                                 0.327522
+evaluation/Returns Max                               -16.6477
+evaluation/Returns Min                               -17.3027
+evaluation/Actions Mean                                0.0244835
+evaluation/Actions Std                                 0.15959
+evaluation/Actions Max                                 0.736108
+evaluation/Actions Min                                -0.909648
+evaluation/Num Paths                                   2
+evaluation/Average Returns                           -16.9752
+evaluation/env_infos/final/distance_to_goal Mean       0.152413
+evaluation/env_infos/final/distance_to_goal Std        0.00318177
+evaluation/env_infos/final/distance_to_goal Max        0.155595
+evaluation/env_infos/final/distance_to_goal Min        0.149231
+evaluation/env_infos/initial/distance_to_goal Mean     0.375191
+evaluation/env_infos/initial/distance_to_goal Std      0.00143015
+evaluation/env_infos/initial/distance_to_goal Max      0.376622
+evaluation/env_infos/initial/distance_to_goal Min      0.373761
+evaluation/env_infos/distance_to_goal Mean             0.201422
+evaluation/env_infos/distance_to_goal Std              0.0619629
+evaluation/env_infos/distance_to_goal Max              0.376622
+evaluation/env_infos/distance_to_goal Min              0.149231
+evaluation/env_infos/final/standoff_error Mean         0.152413
+evaluation/env_infos/final/standoff_error Std          0.00318177
+evaluation/env_infos/final/standoff_error Max          0.155595
+evaluation/env_infos/final/standoff_error Min          0.149231
+evaluation/env_infos/initial/standoff_error Mean       0.375191
+evaluation/env_infos/initial/standoff_error Std        0.00143015
+evaluation/env_infos/initial/standoff_error Max        0.376622
+evaluation/env_infos/initial/standoff_error Min        0.373761
+evaluation/env_infos/standoff_error Mean               0.201422
+evaluation/env_infos/standoff_error Std                0.0619629
+evaluation/env_infos/standoff_error Max                0.376622
+evaluation/env_infos/standoff_error Min                0.149231
+evaluation/env_infos/final/is_success Mean             0
+evaluation/env_infos/final/is_success Std              0
+evaluation/env_infos/final/is_success Max              0
+evaluation/env_infos/final/is_success Min              0
+evaluation/env_infos/initial/is_success Mean           0
+evaluation/env_infos/initial/is_success Std            0
+evaluation/env_infos/initial/is_success Max            0
+evaluation/env_infos/initial/is_success Min            0
+evaluation/env_infos/is_success Mean                   0
+evaluation/env_infos/is_success Std                    0
+evaluation/env_infos/is_success Max                    0
+evaluation/env_infos/is_success Min                    0
+evaluation/env_infos/final/hover_locked Mean           0
+evaluation/env_infos/final/hover_locked Std            0
+evaluation/env_infos/final/hover_locked Max            0
+evaluation/env_infos/final/hover_locked Min            0
+evaluation/env_infos/initial/hover_locked Mean         0
+evaluation/env_infos/initial/hover_locked Std          0
+evaluation/env_infos/initial/hover_locked Max          0
+evaluation/env_infos/initial/hover_locked Min          0
+evaluation/env_infos/hover_locked Mean                 0
+evaluation/env_infos/hover_locked Std                  0
+evaluation/env_infos/hover_locked Max                  0
+evaluation/env_infos/hover_locked Min                  0
+evaluation/env_infos/final/press_success Mean          0
+evaluation/env_infos/final/press_success Std           0
+evaluation/env_infos/final/press_success Max           0
+evaluation/env_infos/final/press_success Min           0
+evaluation/env_infos/initial/press_success Mean        0
+evaluation/env_infos/initial/press_success Std         0
+evaluation/env_infos/initial/press_success Max         0
+evaluation/env_infos/initial/press_success Min         0
+evaluation/env_infos/press_success Mean                0
+evaluation/env_infos/press_success Std                 0
+evaluation/env_infos/press_success Max                 0
+evaluation/env_infos/press_success Min                 0
+evaluation/env_infos/final/hover_xy_error Mean         0.0980524
+evaluation/env_infos/final/hover_xy_error Std          0.00364812
+evaluation/env_infos/final/hover_xy_error Max          0.101701
+evaluation/env_infos/final/hover_xy_error Min          0.0944043
+evaluation/env_infos/initial/hover_xy_error Mean       0.199283
+evaluation/env_infos/initial/hover_xy_error Std        0.0105325
+evaluation/env_infos/initial/hover_xy_error Max        0.209815
+evaluation/env_infos/initial/hover_xy_error Min        0.18875
+evaluation/env_infos/hover_xy_error Mean               0.121296
+evaluation/env_infos/hover_xy_error Std                0.0263859
+evaluation/env_infos/hover_xy_error Max                0.209815
+evaluation/env_infos/hover_xy_error Min                0.0944043
+evaluation/env_infos/final/hover_z_error Mean          0.116666
+evaluation/env_infos/final/hover_z_error Std           0.00109059
+evaluation/env_infos/final/hover_z_error Max           0.117757
+evaluation/env_infos/final/hover_z_error Min           0.115576
+evaluation/env_infos/initial/hover_z_error Mean        0.317682
+evaluation/env_infos/initial/hover_z_error Std         0.00491798
+evaluation/env_infos/initial/hover_z_error Max         0.3226
+evaluation/env_infos/initial/hover_z_error Min         0.312764
+evaluation/env_infos/hover_z_error Mean                0.160034
+evaluation/env_infos/hover_z_error Std                 0.058226
+evaluation/env_infos/hover_z_error Max                 0.3226
+evaluation/env_infos/hover_z_error Min                 0.115576
+evaluation/env_infos/final/press_distance Mean         0.17644
+evaluation/env_infos/final/press_distance Std          0.00293391
+evaluation/env_infos/final/press_distance Max          0.179374
+evaluation/env_infos/final/press_distance Min          0.173506
+evaluation/env_infos/initial/press_distance Mean       0.400912
+evaluation/env_infos/initial/press_distance Std        0.000970393
+evaluation/env_infos/initial/press_distance Max        0.401883
+evaluation/env_infos/initial/press_distance Min        0.399942
+evaluation/env_infos/press_distance Mean               0.2258
+evaluation/env_infos/press_distance Std                0.0626616
+evaluation/env_infos/press_distance Max                0.401883
+evaluation/env_infos/press_distance Min                0.173506
+evaluation/env_infos/final/press_xy_error Mean         0.0980524
+evaluation/env_infos/final/press_xy_error Std          0.00364812
+evaluation/env_infos/final/press_xy_error Max          0.101701
+evaluation/env_infos/final/press_xy_error Min          0.0944043
+evaluation/env_infos/initial/press_xy_error Mean       0.199283
+evaluation/env_infos/initial/press_xy_error Std        0.0105325
+evaluation/env_infos/initial/press_xy_error Max        0.209815
+evaluation/env_infos/initial/press_xy_error Min        0.18875
+evaluation/env_infos/press_xy_error Mean               0.121296
+evaluation/env_infos/press_xy_error Std                0.0263859
+evaluation/env_infos/press_xy_error Max                0.209815
+evaluation/env_infos/press_xy_error Min                0.0944043
+evaluation/env_infos/final/press_z_error Mean          0.146666
+evaluation/env_infos/final/press_z_error Std           0.00109059
+evaluation/env_infos/final/press_z_error Max           0.147757
+evaluation/env_infos/final/press_z_error Min           0.145576
+evaluation/env_infos/initial/press_z_error Mean        0.347682
+evaluation/env_infos/initial/press_z_error Std         0.00491798
+evaluation/env_infos/initial/press_z_error Max         0.3526
+evaluation/env_infos/initial/press_z_error Min         0.342764
+evaluation/env_infos/press_z_error Mean                0.190034
+evaluation/env_infos/press_z_error Std                 0.058226
+evaluation/env_infos/press_z_error Max                 0.3526
+evaluation/env_infos/press_z_error Min                 0.145576
+evaluation/env_infos/final/target_xyz Mean             0.309333
+evaluation/env_infos/final/target_xyz Std              0.392769
+evaluation/env_infos/final/target_xyz Max              0.858
+evaluation/env_infos/final/target_xyz Min             -0.04
+evaluation/env_infos/initial/target_xyz Mean           0.309333
+evaluation/env_infos/initial/target_xyz Std            0.392769
+evaluation/env_infos/initial/target_xyz Max            0.858
+evaluation/env_infos/initial/target_xyz Min           -0.04
+evaluation/env_infos/target_xyz Mean                   0.309333
+evaluation/env_infos/target_xyz Std                    0.392769
+evaluation/env_infos/target_xyz Max                    0.858
+evaluation/env_infos/target_xyz Min                   -0.04
+evaluation/env_infos/final/hover_target_xyz Mean       0.309333
+evaluation/env_infos/final/hover_target_xyz Std        0.392769
+evaluation/env_infos/final/hover_target_xyz Max        0.858
+evaluation/env_infos/final/hover_target_xyz Min       -0.04
+evaluation/env_infos/initial/hover_target_xyz Mean     0.309333
+evaluation/env_infos/initial/hover_target_xyz Std      0.392769
+evaluation/env_infos/initial/hover_target_xyz Max      0.858
+evaluation/env_infos/initial/hover_target_xyz Min     -0.04
+evaluation/env_infos/hover_target_xyz Mean             0.309333
+evaluation/env_infos/hover_target_xyz Std              0.392769
+evaluation/env_infos/hover_target_xyz Max              0.858
+evaluation/env_infos/hover_target_xyz Min             -0.04
+evaluation/env_infos/final/press_target_xyz Mean       0.299333
+evaluation/env_infos/final/press_target_xyz Std        0.378806
+evaluation/env_infos/final/press_target_xyz Max        0.828
+evaluation/env_infos/final/press_target_xyz Min       -0.04
+evaluation/env_infos/initial/press_target_xyz Mean     0.299333
+evaluation/env_infos/initial/press_target_xyz Std      0.378806
+evaluation/env_infos/initial/press_target_xyz Max      0.828
+evaluation/env_infos/initial/press_target_xyz Min     -0.04
+evaluation/env_infos/press_target_xyz Mean             0.299333
+evaluation/env_infos/press_target_xyz Std              0.378806
+evaluation/env_infos/press_target_xyz Max              0.828
+evaluation/env_infos/press_target_xyz Min             -0.04
+evaluation/env_infos/final/target_key_id Mean          0
+evaluation/env_infos/final/target_key_id Std           0
+evaluation/env_infos/final/target_key_id Max           0
+evaluation/env_infos/final/target_key_id Min           0
+evaluation/env_infos/initial/target_key_id Mean        0
+evaluation/env_infos/initial/target_key_id Std         0
+evaluation/env_infos/initial/target_key_id Max         0
+evaluation/env_infos/initial/target_key_id Min         0
+evaluation/env_infos/target_key_id Mean                0
+evaluation/env_infos/target_key_id Std                 0
+evaluation/env_infos/target_key_id Max                 0
+evaluation/env_infos/target_key_id Min                 0
+evaluation/env_infos/final/eef_xyz Mean                0.386974
+evaluation/env_infos/final/eef_xyz Std                 0.425645
+evaluation/env_infos/final/eef_xyz Max                 0.975757
+evaluation/env_infos/final/eef_xyz Min                -0.0210701
+evaluation/env_infos/initial/eef_xyz Mean              0.503455
+evaluation/env_infos/initial/eef_xyz Std               0.485914
+evaluation/env_infos/initial/eef_xyz Max               1.1806
+evaluation/env_infos/initial/eef_xyz Min               0.032984
+evaluation/env_infos/eef_xyz Mean                      0.409239
+evaluation/env_infos/eef_xyz Std                       0.443811
+evaluation/env_infos/eef_xyz Max                       1.1806
+evaluation/env_infos/eef_xyz Min                      -0.0534803
+time/data storing (s)                                  0.000207988
+time/evaluation sampling (s)                           1.29618
+time/exploration sampling (s)                          1.42264
+time/logging (s)                                       0.00432196
+time/saving (s)                                        6.5395e-05
+time/training (s)                                      0.888876
+time/epoch (s)                                         3.6123
+time/total (s)                                        23.2145
+Epoch                                                  1
+---------------------------------------------------  -------------
+2026-03-15 07:56:48.212077 UTC | [keypad_hover_delta_probe2_2026_03_15_07_56_31_0000--s-0] Epoch 2 finished
+---------------------------------------------------  -------------
+replay_buffer/size                                   320
+trainer/QF1 Loss                                       0.279868
+trainer/QF2 Loss                                       0.281276
+trainer/Policy Loss                                   -3.43836
+trainer/Q1 Predictions Mean                            1.49657
+trainer/Q1 Predictions Std                             0.0464497
+trainer/Q1 Predictions Max                             1.58042
+trainer/Q1 Predictions Min                             1.37701
+trainer/Q2 Predictions Mean                            1.47746
+trainer/Q2 Predictions Std                             0.04497
+trainer/Q2 Predictions Max                             1.56888
+trainer/Q2 Predictions Min                             1.37636
+trainer/Q Targets Mean                                 1.5149
+trainer/Q Targets Std                                  0.534404
+trainer/Q Targets Max                                  2.50796
+trainer/Q Targets Min                                 -0.498491
+trainer/Log Pis Mean                                  -1.96319
+trainer/Log Pis Std                                    0.379356
+trainer/Log Pis Max                                   -0.606218
+trainer/Log Pis Min                                   -3.30551
+trainer/Policy mu Mean                                -0.00772429
+trainer/Policy mu Std                                  0.159199
+trainer/Policy mu Max                                  0.649736
+trainer/Policy mu Min                                 -0.577217
+trainer/Policy log std Mean                           -0.184792
+trainer/Policy log std Std                             0.0651884
+trainer/Policy log std Max                             0.06854
+trainer/Policy log std Min                            -0.464226
+trainer/Alpha                                          0.967164
+trainer/Alpha Loss                                    -0.164102
+exploration/num steps total                          320
+exploration/num paths total                            8
+exploration/path length Mean                          40
+exploration/path length Std                            0
+exploration/path length Max                           40
+exploration/path length Min                           40
+exploration/Rewards Mean                              -0.554735
+exploration/Rewards Std                                0.149203
+exploration/Rewards Max                               -0.213936
+exploration/Rewards Min                               -0.783821
+exploration/Returns Mean                             -22.1894
+exploration/Returns Std                                0.806147
+exploration/Returns Max                              -21.3832
+exploration/Returns Min                              -22.9955
+exploration/Actions Mean                               0.0214599
+exploration/Actions Std                                0.580093
+exploration/Actions Max                                0.98166
+exploration/Actions Min                               -0.971749
+exploration/Num Paths                                  2
+exploration/Average Returns                          -22.1894
+exploration/env_infos/final/distance_to_goal Mean      0.195545
+exploration/env_infos/final/distance_to_goal Std       0.0490457
+exploration/env_infos/final/distance_to_goal Max       0.244591
+exploration/env_infos/final/distance_to_goal Min       0.1465
+exploration/env_infos/initial/distance_to_goal Mean    0.361253
+exploration/env_infos/initial/distance_to_goal Std     0.0128811
+exploration/env_infos/initial/distance_to_goal Max     0.374134
+exploration/env_infos/initial/distance_to_goal Min     0.348372
+exploration/env_infos/distance_to_goal Mean            0.253396
+exploration/env_infos/distance_to_goal Std             0.0578683
+exploration/env_infos/distance_to_goal Max             0.374134
+exploration/env_infos/distance_to_goal Min             0.117901
+exploration/env_infos/final/standoff_error Mean        0.195545
+exploration/env_infos/final/standoff_error Std         0.0490457
+exploration/env_infos/final/standoff_error Max         0.244591
+exploration/env_infos/final/standoff_error Min         0.1465
+exploration/env_infos/initial/standoff_error Mean      0.361253
+exploration/env_infos/initial/standoff_error Std       0.0128811
+exploration/env_infos/initial/standoff_error Max       0.374134
+exploration/env_infos/initial/standoff_error Min       0.348372
+exploration/env_infos/standoff_error Mean              0.253396
+exploration/env_infos/standoff_error Std               0.0578683
+exploration/env_infos/standoff_error Max               0.374134
+exploration/env_infos/standoff_error Min               0.117901
+exploration/env_infos/final/is_success Mean            0
+exploration/env_infos/final/is_success Std             0
+exploration/env_infos/final/is_success Max             0
+exploration/env_infos/final/is_success Min             0
+exploration/env_infos/initial/is_success Mean          0
+exploration/env_infos/initial/is_success Std           0
+exploration/env_infos/initial/is_success Max           0
+exploration/env_infos/initial/is_success Min           0
+exploration/env_infos/is_success Mean                  0
+exploration/env_infos/is_success Std                   0
+exploration/env_infos/is_success Max                   0
+exploration/env_infos/is_success Min                   0
+exploration/env_infos/final/hover_locked Mean          0
+exploration/env_infos/final/hover_locked Std           0
+exploration/env_infos/final/hover_locked Max           0
+exploration/env_infos/final/hover_locked Min           0
+exploration/env_infos/initial/hover_locked Mean        0
+exploration/env_infos/initial/hover_locked Std         0
+exploration/env_infos/initial/hover_locked Max         0
+exploration/env_infos/initial/hover_locked Min         0
+exploration/env_infos/hover_locked Mean                0
+exploration/env_infos/hover_locked Std                 0
+exploration/env_infos/hover_locked Max                 0
+exploration/env_infos/hover_locked Min                 0
+exploration/env_infos/final/press_success Mean         0
+exploration/env_infos/final/press_success Std          0
+exploration/env_infos/final/press_success Max          0
+exploration/env_infos/final/press_success Min          0
+exploration/env_infos/initial/press_success Mean       0
+exploration/env_infos/initial/press_success Std        0
+exploration/env_infos/initial/press_success Max        0
+exploration/env_infos/initial/press_success Min        0
+exploration/env_infos/press_success Mean               0
+exploration/env_infos/press_success Std                0
+exploration/env_infos/press_success Max                0
+exploration/env_infos/press_success Min                0
+exploration/env_infos/final/hover_xy_error Mean        0.0834719
+exploration/env_infos/final/hover_xy_error Std         0.0437914
+exploration/env_infos/final/hover_xy_error Max         0.127263
+exploration/env_infos/final/hover_xy_error Min         0.0396805
+exploration/env_infos/initial/hover_xy_error Mean      0.204841
+exploration/env_infos/initial/hover_xy_error Std       0.00871513
+exploration/env_infos/initial/hover_xy_error Max       0.213556
+exploration/env_infos/initial/hover_xy_error Min       0.196126
+exploration/env_infos/hover_xy_error Mean              0.185233
+exploration/env_infos/hover_xy_error Std               0.0712333
+exploration/env_infos/hover_xy_error Max               0.277696
+exploration/env_infos/hover_xy_error Min               0.0349593
+exploration/env_infos/final/hover_z_error Mean         0.174949
+exploration/env_infos/final/hover_z_error Std          0.0339259
+exploration/env_infos/final/hover_z_error Max          0.208875
+exploration/env_infos/final/hover_z_error Min          0.141023
+exploration/env_infos/initial/hover_z_error Mean       0.297559
+exploration/env_infos/initial/hover_z_error Std        0.00963879
+exploration/env_infos/initial/hover_z_error Max        0.307197
+exploration/env_infos/initial/hover_z_error Min        0.28792
+exploration/env_infos/hover_z_error Mean               0.149267
+exploration/env_infos/hover_z_error Std                0.0767625
+exploration/env_infos/hover_z_error Max                0.307197
+exploration/env_infos/hover_z_error Min                0.00758493
+exploration/env_infos/final/press_distance Mean        0.223114
+exploration/env_infos/final/press_distance Std         0.0475472
+exploration/env_infos/final/press_distance Max         0.270661
+exploration/env_infos/final/press_distance Min         0.175566
+exploration/env_infos/initial/press_distance Mean      0.386342
+exploration/env_infos/initial/press_distance Std       0.012793
+exploration/env_infos/initial/press_distance Max       0.399135
+exploration/env_infos/initial/press_distance Min       0.373549
+exploration/env_infos/press_distance Mean              0.270978
+exploration/env_infos/press_distance Std               0.0599469
+exploration/env_infos/press_distance Max               0.399135
+exploration/env_infos/press_distance Min               0.137468
+exploration/env_infos/final/press_xy_error Mean        0.0834719
+exploration/env_infos/final/press_xy_error Std         0.0437914
+exploration/env_infos/final/press_xy_error Max         0.127263
+exploration/env_infos/final/press_xy_error Min         0.0396805
+exploration/env_infos/initial/press_xy_error Mean      0.204841
+exploration/env_infos/initial/press_xy_error Std       0.00871513
+exploration/env_infos/initial/press_xy_error Max       0.213556
+exploration/env_infos/initial/press_xy_error Min       0.196126
+exploration/env_infos/press_xy_error Mean              0.185233
+exploration/env_infos/press_xy_error Std               0.0712333
+exploration/env_infos/press_xy_error Max               0.277696
+exploration/env_infos/press_xy_error Min               0.0349593
+exploration/env_infos/final/press_z_error Mean         0.204949
+exploration/env_infos/final/press_z_error Std          0.0339259
+exploration/env_infos/final/press_z_error Max          0.238875
+exploration/env_infos/final/press_z_error Min          0.171023
+exploration/env_infos/initial/press_z_error Mean       0.327559
+exploration/env_infos/initial/press_z_error Std        0.00963879
+exploration/env_infos/initial/press_z_error Max        0.337197
+exploration/env_infos/initial/press_z_error Min        0.31792
+exploration/env_infos/press_z_error Mean               0.175104
+exploration/env_infos/press_z_error Std                0.0835216
+exploration/env_infos/press_z_error Max                0.337197
+exploration/env_infos/press_z_error Min                0.00785387
+exploration/env_infos/final/target_xyz Mean            0.309333
+exploration/env_infos/final/target_xyz Std             0.392769
+exploration/env_infos/final/target_xyz Max             0.858
+exploration/env_infos/final/target_xyz Min            -0.04
+exploration/env_infos/initial/target_xyz Mean          0.309333
+exploration/env_infos/initial/target_xyz Std           0.392769
+exploration/env_infos/initial/target_xyz Max           0.858
+exploration/env_infos/initial/target_xyz Min          -0.04
+exploration/env_infos/target_xyz Mean                  0.309333
+exploration/env_infos/target_xyz Std                   0.392769
+exploration/env_infos/target_xyz Max                   0.858
+exploration/env_infos/target_xyz Min                  -0.04
+exploration/env_infos/final/hover_target_xyz Mean      0.309333
+exploration/env_infos/final/hover_target_xyz Std       0.392769
+exploration/env_infos/final/hover_target_xyz Max       0.858
+exploration/env_infos/final/hover_target_xyz Min      -0.04
+exploration/env_infos/initial/hover_target_xyz Mean    0.309333
+exploration/env_infos/initial/hover_target_xyz Std     0.392769
+exploration/env_infos/initial/hover_target_xyz Max     0.858
+exploration/env_infos/initial/hover_target_xyz Min    -0.04
+exploration/env_infos/hover_target_xyz Mean            0.309333
+exploration/env_infos/hover_target_xyz Std             0.392769
+exploration/env_infos/hover_target_xyz Max             0.858
+exploration/env_infos/hover_target_xyz Min            -0.04
+exploration/env_infos/final/press_target_xyz Mean      0.299333
+exploration/env_infos/final/press_target_xyz Std       0.378806
+exploration/env_infos/final/press_target_xyz Max       0.828
+exploration/env_infos/final/press_target_xyz Min      -0.04
+exploration/env_infos/initial/press_target_xyz Mean    0.299333
+exploration/env_infos/initial/press_target_xyz Std     0.378806
+exploration/env_infos/initial/press_target_xyz Max     0.828
+exploration/env_infos/initial/press_target_xyz Min    -0.04
+exploration/env_infos/press_target_xyz Mean            0.299333
+exploration/env_infos/press_target_xyz Std             0.378806
+exploration/env_infos/press_target_xyz Max             0.828
+exploration/env_infos/press_target_xyz Min            -0.04
+exploration/env_infos/final/target_key_id Mean         0
+exploration/env_infos/final/target_key_id Std          0
+exploration/env_infos/final/target_key_id Max          0
+exploration/env_infos/final/target_key_id Min          0
+exploration/env_infos/initial/target_key_id Mean       0
+exploration/env_infos/initial/target_key_id Std        0
+exploration/env_infos/initial/target_key_id Max        0
+exploration/env_infos/initial/target_key_id Min        0
+exploration/env_infos/target_key_id Mean               0
+exploration/env_infos/target_key_id Std                0
+exploration/env_infos/target_key_id Max                0
+exploration/env_infos/target_key_id Min                0
+exploration/env_infos/final/eef_xyz Mean               0.390931
+exploration/env_infos/final/eef_xyz Std                0.46033
+exploration/env_infos/final/eef_xyz Max                1.06688
+exploration/env_infos/final/eef_xyz Min               -0.0780704
+exploration/env_infos/initial/eef_xyz Mean             0.502507
+exploration/env_infos/initial/eef_xyz Std              0.470206
+exploration/env_infos/initial/eef_xyz Max              1.1652
+exploration/env_infos/initial/eef_xyz Min              0.0664618
+exploration/env_infos/eef_xyz Mean                     0.423717
+exploration/env_infos/eef_xyz Std                      0.4318
+exploration/env_infos/eef_xyz Max                      1.1652
+exploration/env_infos/eef_xyz Min                     -0.122611
+evaluation/num steps total                           240
+evaluation/num paths total                             6
+evaluation/path length Mean                           40
+evaluation/path length Std                             0
+evaluation/path length Max                            40
+evaluation/path length Min                            40
+evaluation/Rewards Mean                               -0.552153
+evaluation/Rewards Std                                 0.102955
+evaluation/Rewards Max                                -0.418079
+evaluation/Rewards Min                                -0.772105
+evaluation/Returns Mean                              -22.0861
+evaluation/Returns Std                                 0.194085
+evaluation/Returns Max                               -21.892
+evaluation/Returns Min                               -22.2802
+evaluation/Actions Mean                                0.0207898
+evaluation/Actions Std                                 0.0654592
+evaluation/Actions Max                                 0.238642
+evaluation/Actions Min                                -0.241037
+evaluation/Num Paths                                   2
+evaluation/Average Returns                           -22.0861
+evaluation/env_infos/final/distance_to_goal Mean       0.190723
+evaluation/env_infos/final/distance_to_goal Std        0.00239442
+evaluation/env_infos/final/distance_to_goal Max        0.193118
+evaluation/env_infos/final/distance_to_goal Min        0.188329
+evaluation/env_infos/initial/distance_to_goal Mean     0.370132
+evaluation/env_infos/initial/distance_to_goal Std      0.00602314
+evaluation/env_infos/initial/distance_to_goal Max      0.376155
+evaluation/env_infos/initial/distance_to_goal Min      0.364109
+evaluation/env_infos/distance_to_goal Mean             0.251915
+evaluation/env_infos/distance_to_goal Std              0.0528014
+evaluation/env_infos/distance_to_goal Max              0.376155
+evaluation/env_infos/distance_to_goal Min              0.188329
+evaluation/env_infos/final/standoff_error Mean         0.190723
+evaluation/env_infos/final/standoff_error Std          0.00239442
+evaluation/env_infos/final/standoff_error Max          0.193118
+evaluation/env_infos/final/standoff_error Min          0.188329
+evaluation/env_infos/initial/standoff_error Mean       0.370132
+evaluation/env_infos/initial/standoff_error Std        0.00602314
+evaluation/env_infos/initial/standoff_error Max        0.376155
+evaluation/env_infos/initial/standoff_error Min        0.364109
+evaluation/env_infos/standoff_error Mean               0.251915
+evaluation/env_infos/standoff_error Std                0.0528014
+evaluation/env_infos/standoff_error Max                0.376155
+evaluation/env_infos/standoff_error Min                0.188329
+evaluation/env_infos/final/is_success Mean             0
+evaluation/env_infos/final/is_success Std              0
+evaluation/env_infos/final/is_success Max              0
+evaluation/env_infos/final/is_success Min              0
+evaluation/env_infos/initial/is_success Mean           0
+evaluation/env_infos/initial/is_success Std            0
+evaluation/env_infos/initial/is_success Max            0
+evaluation/env_infos/initial/is_success Min            0
+evaluation/env_infos/is_success Mean                   0
+evaluation/env_infos/is_success Std                    0
+evaluation/env_infos/is_success Max                    0
+evaluation/env_infos/is_success Min                    0
+evaluation/env_infos/final/hover_locked Mean           0
+evaluation/env_infos/final/hover_locked Std            0
+evaluation/env_infos/final/hover_locked Max            0
+evaluation/env_infos/final/hover_locked Min            0
+evaluation/env_infos/initial/hover_locked Mean         0
+evaluation/env_infos/initial/hover_locked Std          0
+evaluation/env_infos/initial/hover_locked Max          0
+evaluation/env_infos/initial/hover_locked Min          0
+evaluation/env_infos/hover_locked Mean                 0
+evaluation/env_infos/hover_locked Std                  0
+evaluation/env_infos/hover_locked Max                  0
+evaluation/env_infos/hover_locked Min                  0
+evaluation/env_infos/final/press_success Mean          0
+evaluation/env_infos/final/press_success Std           0
+evaluation/env_infos/final/press_success Max           0
+evaluation/env_infos/final/press_success Min           0
+evaluation/env_infos/initial/press_success Mean        0
+evaluation/env_infos/initial/press_success Std         0
+evaluation/env_infos/initial/press_success Max         0
+evaluation/env_infos/initial/press_success Min         0
+evaluation/env_infos/press_success Mean                0
+evaluation/env_infos/press_success Std                 0
+evaluation/env_infos/press_success Max                 0
+evaluation/env_infos/press_success Min                 0
+evaluation/env_infos/final/hover_xy_error Mean         0.134078
+evaluation/env_infos/final/hover_xy_error Std          0.00152573
+evaluation/env_infos/final/hover_xy_error Max          0.135604
+evaluation/env_infos/final/hover_xy_error Min          0.132553
+evaluation/env_infos/initial/hover_xy_error Mean       0.20381
+evaluation/env_infos/initial/hover_xy_error Std        0.00510219
+evaluation/env_infos/initial/hover_xy_error Max        0.208912
+evaluation/env_infos/initial/hover_xy_error Min        0.198708
+evaluation/env_infos/hover_xy_error Mean               0.171415
+evaluation/env_infos/hover_xy_error Std                0.0277032
+evaluation/env_infos/hover_xy_error Max                0.208912
+evaluation/env_infos/hover_xy_error Min                0.132553
+evaluation/env_infos/final/hover_z_error Mean          0.13564
+evaluation/env_infos/final/hover_z_error Std           0.00185862
+evaluation/env_infos/final/hover_z_error Max           0.137499
+evaluation/env_infos/final/hover_z_error Min           0.133782
+evaluation/env_infos/initial/hover_z_error Mean        0.308958
+evaluation/env_infos/initial/hover_z_error Std         0.00384998
+evaluation/env_infos/initial/hover_z_error Max         0.312808
+evaluation/env_infos/initial/hover_z_error Min         0.305108
+evaluation/env_infos/hover_z_error Mean                0.183124
+evaluation/env_infos/hover_z_error Std                 0.0506423
+evaluation/env_infos/hover_z_error Max                 0.312808
+evaluation/env_infos/hover_z_error Min                 0.133782
+evaluation/env_infos/final/press_distance Mean         0.213105
+evaluation/env_infos/final/press_distance Std          0.00240459
+evaluation/env_infos/final/press_distance Max          0.215509
+evaluation/env_infos/final/press_distance Min          0.2107
+evaluation/env_infos/initial/press_distance Mean       0.395521
+evaluation/env_infos/initial/press_distance Std        0.00592855
+evaluation/env_infos/initial/press_distance Max        0.401449
+evaluation/env_infos/initial/press_distance Min        0.389592
+evaluation/env_infos/press_distance Mean               0.274356
+evaluation/env_infos/press_distance Std                0.0535297
+evaluation/env_infos/press_distance Max                0.401449
+evaluation/env_infos/press_distance Min                0.2107
+evaluation/env_infos/final/press_xy_error Mean         0.134078
+evaluation/env_infos/final/press_xy_error Std          0.00152573
+evaluation/env_infos/final/press_xy_error Max          0.135604
+evaluation/env_infos/final/press_xy_error Min          0.132553
+evaluation/env_infos/initial/press_xy_error Mean       0.20381
+evaluation/env_infos/initial/press_xy_error Std        0.00510219
+evaluation/env_infos/initial/press_xy_error Max        0.208912
+evaluation/env_infos/initial/press_xy_error Min        0.198708
+evaluation/env_infos/press_xy_error Mean               0.171415
+evaluation/env_infos/press_xy_error Std                0.0277032
+evaluation/env_infos/press_xy_error Max                0.208912
+evaluation/env_infos/press_xy_error Min                0.132553
+evaluation/env_infos/final/press_z_error Mean          0.16564
+evaluation/env_infos/final/press_z_error Std           0.00185862
+evaluation/env_infos/final/press_z_error Max           0.167499
+evaluation/env_infos/final/press_z_error Min           0.163782
+evaluation/env_infos/initial/press_z_error Mean        0.338958
+evaluation/env_infos/initial/press_z_error Std         0.00384998
+evaluation/env_infos/initial/press_z_error Max         0.342808
+evaluation/env_infos/initial/press_z_error Min         0.335108
+evaluation/env_infos/press_z_error Mean                0.213124
+evaluation/env_infos/press_z_error Std                 0.0506423
+evaluation/env_infos/press_z_error Max                 0.342808
+evaluation/env_infos/press_z_error Min                 0.163782
+evaluation/env_infos/final/target_xyz Mean             0.309333
+evaluation/env_infos/final/target_xyz Std              0.392769
+evaluation/env_infos/final/target_xyz Max              0.858
+evaluation/env_infos/final/target_xyz Min             -0.04
+evaluation/env_infos/initial/target_xyz Mean           0.309333
+evaluation/env_infos/initial/target_xyz Std            0.392769
+evaluation/env_infos/initial/target_xyz Max            0.858
+evaluation/env_infos/initial/target_xyz Min           -0.04
+evaluation/env_infos/target_xyz Mean                   0.309333
+evaluation/env_infos/target_xyz Std                    0.392769
+evaluation/env_infos/target_xyz Max                    0.858
+evaluation/env_infos/target_xyz Min                   -0.04
+evaluation/env_infos/final/hover_target_xyz Mean       0.309333
+evaluation/env_infos/final/hover_target_xyz Std        0.392769
+evaluation/env_infos/final/hover_target_xyz Max        0.858
+evaluation/env_infos/final/hover_target_xyz Min       -0.04
+evaluation/env_infos/initial/hover_target_xyz Mean     0.309333
+evaluation/env_infos/initial/hover_target_xyz Std      0.392769
+evaluation/env_infos/initial/hover_target_xyz Max      0.858
+evaluation/env_infos/initial/hover_target_xyz Min     -0.04
+evaluation/env_infos/hover_target_xyz Mean             0.309333
+evaluation/env_infos/hover_target_xyz Std              0.392769
+evaluation/env_infos/hover_target_xyz Max              0.858
+evaluation/env_infos/hover_target_xyz Min             -0.04
+evaluation/env_infos/final/press_target_xyz Mean       0.299333
+evaluation/env_infos/final/press_target_xyz Std        0.378806
+evaluation/env_infos/final/press_target_xyz Max        0.828
+evaluation/env_infos/final/press_target_xyz Min       -0.04
+evaluation/env_infos/initial/press_target_xyz Mean     0.299333
+evaluation/env_infos/initial/press_target_xyz Std      0.378806
+evaluation/env_infos/initial/press_target_xyz Max      0.828
+evaluation/env_infos/initial/press_target_xyz Min     -0.04
+evaluation/env_infos/press_target_xyz Mean             0.299333
+evaluation/env_infos/press_target_xyz Std              0.378806
+evaluation/env_infos/press_target_xyz Max              0.828
+evaluation/env_infos/press_target_xyz Min             -0.04
+evaluation/env_infos/final/target_key_id Mean          0
+evaluation/env_infos/final/target_key_id Std           0
+evaluation/env_infos/final/target_key_id Max           0
+evaluation/env_infos/final/target_key_id Min           0
+evaluation/env_infos/initial/target_key_id Mean        0
+evaluation/env_infos/initial/target_key_id Std         0
+evaluation/env_infos/initial/target_key_id Max         0
+evaluation/env_infos/initial/target_key_id Min         0
+evaluation/env_infos/target_key_id Mean                0
+evaluation/env_infos/target_key_id Std                 0
+evaluation/env_infos/target_key_id Max                 0
+evaluation/env_infos/target_key_id Min                 0
+evaluation/env_infos/final/eef_xyz Mean                0.403336
+evaluation/env_infos/final/eef_xyz Std                 0.431776
+evaluation/env_infos/final/eef_xyz Max                 0.995499
+evaluation/env_infos/final/eef_xyz Min                -0.0276524
+evaluation/env_infos/initial/eef_xyz Mean              0.50238
+evaluation/env_infos/initial/eef_xyz Std               0.48091
+evaluation/env_infos/initial/eef_xyz Max               1.17081
+evaluation/env_infos/initial/eef_xyz Min               0.0370749
+evaluation/env_infos/eef_xyz Mean                      0.43447
+evaluation/env_infos/eef_xyz Std                       0.446932
+evaluation/env_infos/eef_xyz Max                       1.17081
+evaluation/env_infos/eef_xyz Min                      -0.035308
+time/data storing (s)                                  0.000207659
+time/evaluation sampling (s)                           1.31095
+time/exploration sampling (s)                          1.35585
+time/logging (s)                                       0.00454643
+time/saving (s)                                        6.7769e-05
+time/training (s)                                      0.88059
+time/epoch (s)                                         3.55222
+time/total (s)                                        28.3605
+Epoch                                                  2
+---------------------------------------------------  -------------

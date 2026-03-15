@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import sys
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
@@ -9,20 +8,21 @@ import gym
 import numpy as np
 from gym import spaces
 
-# Headless-safe default for MuJoCo rendering.
+from alpha_env_utils import ensure_alpha_import_paths, migrate_legacy_env_config
+
+# Headless-safe default for MuJoCo rendering- without this it breaks because it doesn't know :(
 os.environ.setdefault("MUJOCO_GL", os.environ.get("MUJOCO_GL", "egl"))
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ROBO_PATH = os.path.join(ROOT, "..", "external_pkgs", "RoboSuite")
-if os.path.exists(ROBO_PATH) and ROBO_PATH not in sys.path:
-    sys.path.insert(0, ROBO_PATH)
+ensure_alpha_import_paths()
 
 import robosuite as suite
+
+# below adapts controller config for robot controllers
 from robosuite.controllers.composite.composite_controller_factory import (
     refactor_composite_controller_config,
 )
 
-
+# autogenerates init and representation methods 
 @dataclass
 class RoverReachEnvConfig:
     env_name: str = "Lift"
@@ -30,8 +30,11 @@ class RoverReachEnvConfig:
     controller: str = "OSC_POSE"
     control_freq: int = 20
     horizon: int = 200
-    success_threshold_m: float = 0.05
-    success_bonus: float = 5.0
+    # target standoff: policy should hold at exactly this distance from the goal
+    standoff_m: float = 0.03
+    # success = being within this tolerance of the standoff distance
+    standoff_tolerance_m: float = 0.005
+    standoff_bonus: float = 5.0
     distance_weight: float = 1.0
     action_l2_weight: float = 0.01
     max_delta_m: float = 0.04
@@ -46,14 +49,18 @@ class RoverReachEnvConfig:
     camera_height: int = 480
     seed: int = 0
 
+    @classmethod
+    def from_payload(cls, raw_config: Dict[str, Any]) -> "RoverReachEnvConfig":
+        return cls(**migrate_legacy_env_config(raw_config))
+
 
 class Rover2026ReachEnv(gym.Env):
-    """
-    RLKit-compatible Robosuite reaching env for Rover2026.
 
-    Observations: [eef_xyz(3), joint_pos(6), joint_vel(6), target_xyz(3)]
-    Actions: normalized Cartesian deltas [dx, dy, dz] in [-1, 1], mapped to meters via max_delta_m
-    """
+    # RLKit-compatible Robosuite reaching env for Rover2026.
+
+    # Input: [eef_xyz(3), joint_pos(6), joint_vel(6), target_xyz(3)]
+    # Output: normalized Cartesian deltas [dx, dy, dz] in [-1, 1], mapped to meters via max_delta_m
+    
 
     metadata = {"render.modes": ["human", "rgb_array"]}
 
@@ -143,21 +150,27 @@ class Rover2026ReachEnv(gym.Env):
         eef = np.asarray(obs_dict.get("robot0_eef_pos", np.zeros(3)), dtype=np.float32).ravel()
         action = np.asarray(action, dtype=np.float32).reshape(3)
         distance = float(np.linalg.norm(eef - self._target_xyz))
-        success = bool(distance <= self.config.success_threshold_m)
 
+        # error = how far the EEF is from the desired standoff shell
+        standoff_error = abs(distance - self.config.standoff_m)
+        success = bool(standoff_error <= self.config.standoff_tolerance_m)
+
+        # reward penalises deviation from the standoff distance, not from zero
         reward = (
-            -self.config.distance_weight * distance
-            -self.config.action_l2_weight * float(np.linalg.norm(action))
-            + (self.config.success_bonus if success else 0.0)
+            -self.config.distance_weight * standoff_error
+            - self.config.action_l2_weight * float(np.linalg.norm(action))
+            + (self.config.standoff_bonus if success else 0.0)
         )
 
-        done = bool(success or self._step_count >= self.config.horizon)
+        # don't terminate on success — policy must learn to *hold* at standoff
+        done = bool(self._step_count >= self.config.horizon)
         obs = self._flatten_obs(obs_dict)
 
         out_info = dict(info or {})
         out_info.update(
             {
                 "distance_to_goal": distance,
+                "standoff_error": standoff_error,
                 "is_success": float(success),
                 "target_xyz": self._target_xyz.copy(),
                 "eef_xyz": eef.copy(),
@@ -187,14 +200,17 @@ class Rover2026ReachEnv(gym.Env):
 
         successes = []
         final_distances = []
+        final_standoff_errors = []
         for path in paths:
             env_infos = path.get("env_infos", [])
             if not env_infos:
                 continue
             path_success = max(float(info.get("is_success", 0.0)) for info in env_infos)
             final_distance = float(env_infos[-1].get("distance_to_goal", np.nan))
+            final_standoff_err = float(env_infos[-1].get("standoff_error", np.nan))
             successes.append(path_success)
             final_distances.append(final_distance)
+            final_standoff_errors.append(final_standoff_err)
 
         if not successes:
             return {}
@@ -202,6 +218,7 @@ class Rover2026ReachEnv(gym.Env):
         return {
             "success_rate": float(np.mean(successes)),
             "final_distance_mean": float(np.nanmean(final_distances)),
+            "final_standoff_error_mean": float(np.nanmean(final_standoff_errors)),
         }
 
     def close(self):

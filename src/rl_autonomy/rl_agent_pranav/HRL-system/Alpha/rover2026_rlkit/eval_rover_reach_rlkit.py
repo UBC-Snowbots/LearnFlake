@@ -9,6 +9,8 @@ import imageio.v2 as imageio
 import numpy as np
 import torch
 
+from alpha_env_utils import config_from_payload
+
 from rlkit.envs.wrappers import NormalizedBoxEnv
 from rlkit.torch.sac.policies import MakeDeterministic, TanhGaussianPolicy
 
@@ -104,7 +106,7 @@ def main() -> None:
         policy_path = policy_path.resolve()
     payload = torch.load(policy_path, map_location="cpu")
 
-    env_cfg = RoverReachEnvConfig(**payload["env_config"])
+    env_cfg = config_from_payload(RoverReachEnvConfig, payload.get("env_config", {}))
     env_cfg.horizon = args.horizon
     env_cfg.render = bool(args.render)
     env_cfg.offscreen_render = bool(args.record_video)
@@ -123,6 +125,7 @@ def main() -> None:
     returns = []
     successes = []
     final_distances = []
+    final_standoff_errors = []
     frames = []
 
     for ep in range(args.episodes):
@@ -131,6 +134,7 @@ def main() -> None:
         ep_ret = 0.0
         ep_success = 0.0
         ep_final_distance = np.nan
+        ep_final_standoff_err = np.nan
 
         for _ in range(args.horizon):
             if args.record_video and ep == 0:
@@ -141,6 +145,7 @@ def main() -> None:
             ep_ret += float(reward)
             ep_success = max(ep_success, float(info.get("is_success", 0.0)))
             ep_final_distance = float(info.get("distance_to_goal", np.nan))
+            ep_final_standoff_err = float(info.get("standoff_error", np.nan))
 
             if done:
                 break
@@ -148,9 +153,11 @@ def main() -> None:
         returns.append(ep_ret)
         successes.append(ep_success)
         final_distances.append(ep_final_distance)
+        final_standoff_errors.append(ep_final_standoff_err)
         print(
             f"episode={ep + 1:02d} return={ep_ret:.3f} "
-            f"success={ep_success:.1f} final_distance={ep_final_distance:.4f}"
+            f"success={ep_success:.1f} final_distance={ep_final_distance:.4f} "
+            f"standoff_err={ep_final_standoff_err:.4f}"
         )
 
     if args.record_video and frames:
@@ -163,6 +170,7 @@ def main() -> None:
     print(f"  avg_return: {np.mean(returns):.3f}")
     print(f"  success_rate: {np.mean(successes):.3f}")
     print(f"  avg_final_distance: {np.nanmean(final_distances):.4f}")
+    print(f"  avg_standoff_error: {np.nanmean(final_standoff_errors):.4f}")
 
     env.close()
 
