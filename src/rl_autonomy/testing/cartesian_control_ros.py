@@ -83,6 +83,7 @@ class KeyboardBridgeNode(Node):
     ACTUATOR_POS_TOPIC = "/mujoco/actuator_pos"
     ACTUATOR_TRQ_TOPIC = "/mujoco/actuator_torque"
     CONTACT_TOPIC     = "/mujoco/contact_detected"
+    PRESSED_KEY_TOPIC = "/mujoco/pressed_key"
     TARGET_KEY_TOPIC  = "/mujoco/target_key"
     A5_TORQUE_TOPIC   = "/mujoco/a5_torque"         # synthetic Moteus id_5 torque
     A5_DELTA_TOPIC    = "/mujoco/a5_torque_delta"    # torque - baseline = contact signal
@@ -163,6 +164,7 @@ class KeyboardBridgeNode(Node):
         self.act_pos_pub    = self.create_publisher(Float32, self.ACTUATOR_POS_TOPIC, 10)
         self.act_trq_pub    = self.create_publisher(Float32, self.ACTUATOR_TRQ_TOPIC, 10)
         self.contact_pub    = self.create_publisher(Bool, self.CONTACT_TOPIC, 10)
+        self.pressed_pub    = self.create_publisher(String, self.PRESSED_KEY_TOPIC, 10)
         self.target_key_pub = self.create_publisher(String, self.TARGET_KEY_TOPIC, 10)
         self.a5_trq_pub     = self.create_publisher(Float32, self.A5_TORQUE_TOPIC, 10)
         self.a5_delta_pub   = self.create_publisher(Float32, self.A5_DELTA_TOPIC, 10)
@@ -319,6 +321,29 @@ class KeyboardBridgeNode(Node):
 
         # /mujoco/contact_detected
         self.contact_pub.publish(Bool(data=contact_detected))
+
+        # /mujoco/pressed_key — find which key the solenoid tip is closest to
+        pressed_msg = String()
+        if contact_detected:
+            tip_pos = sim.data.site_xpos[
+                sim.model.site_name2id("gripper0_right_actuator_tip_site")
+            ]
+            best_key = ""
+            best_dist = float("inf")
+            for name in self.env.AVAILABLE_KEYS:
+                kpos = sim.data.body_xpos[self.env._key_body_ids[name]]
+                d = float(np.linalg.norm(tip_pos[:2] - kpos[:2]))
+                if d < best_dist:
+                    best_dist = d
+                    best_key = name
+            pressed_msg.data = best_key
+            if best_key != getattr(self, '_last_pressed', ''):
+                self.get_logger().info(f"PRESSED: '{best_key}' (dist={best_dist*100:.1f}cm)")
+                self._last_pressed = best_key
+        else:
+            pressed_msg.data = ""
+            self._last_pressed = ""
+        self.pressed_pub.publish(pressed_msg)
 
         # /mujoco/target_key
         tk_msg = String()

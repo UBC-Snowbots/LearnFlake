@@ -48,10 +48,6 @@ from keyboard_env import PressKeyEnv
 CHECKPOINT_DIR = os.path.join(ROOT, "checkpoints", "press_key")
 LOG_DIR        = os.path.join(ROOT, "logs", "press_key")
 
-DEFAULT_CR_CHECKPOINT = os.path.join(
-    ROOT, "checkpoints", "coarse_reach", "best_model.zip"
-)
-
 
 # ============================================================================
 # Gym wrapper
@@ -67,11 +63,9 @@ class PressKeyGymEnv(gym.Env):
 
     metadata = {'render_modes': ['human']}
 
-    def __init__(self, coarse_reach_checkpoint: str | None = None,
-                 render: bool = False, random_key: bool = True):
+    def __init__(self, render: bool = False, random_key: bool = True):
         super().__init__()
         self._env = PressKeyEnv(
-            coarse_reach_checkpoint=coarse_reach_checkpoint,
             render=render,
             random_key=random_key,
         )
@@ -112,25 +106,17 @@ class PressKeyGymEnv(gym.Env):
 # Training
 # ============================================================================
 
-def make_env(cr_checkpoint: str | None, render: bool = False) -> gym.Env:
-    env = PressKeyGymEnv(coarse_reach_checkpoint=cr_checkpoint, render=render)
+def make_env(render: bool = False) -> gym.Env:
+    env = PressKeyGymEnv(render=render)
     return Monitor(env)
 
 
-def train(timesteps: int, render: bool, cr_checkpoint: str | None,
-          resume_path: str | None):
+def train(timesteps: int, render: bool, resume_path: str | None):
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
     os.makedirs(LOG_DIR, exist_ok=True)
 
-    if cr_checkpoint and not os.path.exists(cr_checkpoint):
-        print(f"[WARN] CoarseReach checkpoint not found: {cr_checkpoint}")
-        print("       Episodes will start from the default arm home pose.")
-        cr_checkpoint = None
-    elif cr_checkpoint:
-        print(f"Using CoarseReach checkpoint: {cr_checkpoint}")
-
-    env      = make_env(cr_checkpoint, render=render)
-    eval_env = make_env(cr_checkpoint, render=False)
+    env      = make_env(render=render)
+    eval_env = make_env(render=False)
 
     if resume_path:
         print(f"Resuming from {resume_path}")
@@ -192,11 +178,8 @@ def train(timesteps: int, render: bool, cr_checkpoint: str | None,
 # Evaluation
 # ============================================================================
 
-def evaluate(model_path: str, cr_checkpoint: str | None,
-             n_episodes: int, render: bool):
-    env = PressKeyGymEnv(
-        coarse_reach_checkpoint=cr_checkpoint, render=render
-    )
+def evaluate(model_path: str, n_episodes: int, render: bool):
+    env = PressKeyGymEnv(render=render)
     model = SAC.load(model_path)
     successes = 0
 
@@ -230,21 +213,16 @@ def main():
     parser.add_argument('--timesteps', type=int, default=90_000,
                         help='Total training steps (default: 90k ≈ 300 ep × 50 steps × ~6 iters)')
     parser.add_argument('--no-render', action='store_true')
-    parser.add_argument('--cr-checkpoint', type=str,
-                        default=DEFAULT_CR_CHECKPOINT,
-                        help='Path to CoarseReach best_model.zip')
     parser.add_argument('--eval', type=str, default=None, metavar='PATH')
     parser.add_argument('--eval-episodes', type=int, default=50)
     parser.add_argument('--resume', type=str, default=None, metavar='PATH')
     args = parser.parse_args()
 
-    cr = args.cr_checkpoint if os.path.exists(args.cr_checkpoint) else None
-
     if args.eval:
-        evaluate(args.eval, cr, args.eval_episodes, render=not args.no_render)
+        evaluate(args.eval, args.eval_episodes, render=not args.no_render)
     else:
         train(args.timesteps, render=not args.no_render,
-              cr_checkpoint=cr, resume_path=args.resume)
+              resume_path=args.resume)
 
 
 if __name__ == '__main__':

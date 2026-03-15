@@ -76,3 +76,7 @@ src/rl_autonomy/env.py
 .venv
 src/MUJOCO_LOG.TXT
 git_log_capture.txt
+
+# CLAUDE
+CLAUDE.md
+src/rl_autonomy/testanddebug.py

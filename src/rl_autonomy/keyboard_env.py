@@ -2,7 +2,7 @@
 KeyboardEnv — base MuJoCo environment for the keyboard typing pipeline.
 
 Inherits from ManipulationEnv (RoboSuite) and adds:
-  - Keyboard scene (5 test keys: Q W E R T) injected onto the table
+  - Keyboard scene (Redragon K552 TKL, 87 keys) injected onto the table
   - Solenoid actuator observations (extended flag, velocity)
   - Rangefinder sensor
   - Synthesized ArUco observation (dx, dy, key_visible) — matches real pipeline
@@ -34,24 +34,98 @@ from robosuite.controllers.composite.composite_controller_factory import (
 )
 
 # ---------------------------------------------------------------------------
-# Keyboard layout (Phase 2: 5 test keys)
+# Keyboard layout — Redragon K552 TKL (87 keys)
 # ---------------------------------------------------------------------------
-# ~70% of real keyboard scale.  Positions are relative to the keyboard base
-# centre, in the table body frame.
-# Full key layout can be expanded here without touching any other code.
+# Standard 19 mm key pitch.  Positions are relative to the keyboard body
+# centre, computed from a U-based layout (1 U = KEY_PITCH).
+#
+# Coordinate mapping (keyboard body local frame):
+#   X_local = row direction  (pos = back / F-keys, neg = front / space bar)
+#   Y_local = column direction (pos = left / Esc side, neg = right / nav cluster)
+#   Keyboard faces the robot (space bar row nearest to arm base).
 
-KEY_PITCH = 0.019   # centre-to-centre spacing (m)
-KEY_HALF  = 0.007   # key half-size in XY (m)
+KEY_PITCH = 0.019   # centre-to-centre spacing (m), standard 19 mm
+KEY_HALF  = 0.009   # half-size of a 1 U key cap in XY (m)
 KEY_H     = 0.002   # key half-height (m)
+KEY_GAP   = 0.001   # gap between adjacent key caps (m)
 
-# (name, x_offset_from_row_centre)
-PHASE2_KEYS = [
-    ("q", -2),
-    ("w", -1),
-    ("e",  0),
-    ("r", +1),
-    ("t", +2),
-]
+# TKL bounding box in U
+_KB_WIDTH_U  = 18.25   # total columns (with nav cluster)
+_KB_HEIGHT_U = 6.5      # total rows (F-row + 0.5U gap + 5 main rows)
+_KB_CENTER_COL = _KB_WIDTH_U / 2    # 9.125
+_KB_CENTER_ROW = _KB_HEIGHT_U / 2   # 3.25
+
+
+def _build_tkl_layout():
+    """Compute Redragon K552 TKL layout.
+
+    Returns list of (name, x_local_m, y_local_m, width_u).
+    """
+    layout = []
+
+    def add_row(row_u, keys):
+        col = 0.0
+        for name, w in keys:
+            if name is not None:
+                # Negate both axes → 180° rotation so keyboard faces the arm
+                cx = -((row_u - _KB_CENTER_ROW) * KEY_PITCH)
+                cy = -((col + w / 2.0 - _KB_CENTER_COL) * KEY_PITCH)
+                layout.append((name, cx, cy, w))
+            col += w
+
+    # Row 0 — F-key row (center at 0.5 U from top)
+    add_row(0.5, [
+        ("esc", 1), (None, 1),
+        ("f1", 1), ("f2", 1), ("f3", 1), ("f4", 1), (None, 0.5),
+        ("f5", 1), ("f6", 1), ("f7", 1), ("f8", 1), (None, 0.5),
+        ("f9", 1), ("f10", 1), ("f11", 1), ("f12", 1), (None, 0.25),
+        ("prtsc", 1), ("scrlk", 1), ("pause", 1),
+    ])
+
+    # Row 1 — Number row (2.0 U)
+    add_row(2.0, [
+        ("grave", 1), ("1", 1), ("2", 1), ("3", 1), ("4", 1), ("5", 1),
+        ("6", 1), ("7", 1), ("8", 1), ("9", 1), ("0", 1),
+        ("minus", 1), ("equal", 1), ("backspace", 2), (None, 0.25),
+        ("ins", 1), ("home", 1), ("pgup", 1),
+    ])
+
+    # Row 2 — QWERTY row (3.0 U)
+    add_row(3.0, [
+        ("tab", 1.5), ("q", 1), ("w", 1), ("e", 1), ("r", 1), ("t", 1),
+        ("y", 1), ("u", 1), ("i", 1), ("o", 1), ("p", 1),
+        ("lbracket", 1), ("rbracket", 1), ("backslash", 1.5), (None, 0.25),
+        ("del", 1), ("end", 1), ("pgdn", 1),
+    ])
+
+    # Row 3 — Home row (4.0 U)
+    add_row(4.0, [
+        ("caps", 1.75), ("a", 1), ("s", 1), ("d", 1), ("f", 1), ("g", 1),
+        ("h", 1), ("j", 1), ("k", 1), ("l", 1),
+        ("semicolon", 1), ("quote", 1), ("enter", 2.25),
+    ])
+
+    # Row 4 — Shift row (5.0 U)
+    add_row(5.0, [
+        ("lshift", 2.25), ("z", 1), ("x", 1), ("c", 1), ("v", 1), ("b", 1),
+        ("n", 1), ("m", 1), ("comma", 1), ("period", 1), ("slash", 1),
+        ("rshift", 2.75), (None, 1.25),
+        ("up", 1),
+    ])
+
+    # Row 5 — Space bar row (6.0 U)
+    add_row(6.0, [
+        ("lctrl", 1.25), ("win", 1.25), ("lalt", 1.25),
+        ("space", 6.25),
+        ("ralt", 1.25), ("fn", 1.25), ("menu", 1.25), ("rctrl", 1.25),
+        (None, 0.25),
+        ("left", 1), ("down", 1), ("right", 1),
+    ])
+
+    return layout
+
+
+TKL_KEYS = _build_tkl_layout()
 
 # ArUco synthesizer constants
 ARUCO_NOISE_STD      = 0.001   # ~1 mm standard deviation
@@ -77,8 +151,7 @@ class KeyboardEnv(ManipulationEnv):
         horizon (int): max steps per episode.
     """
 
-    # Keys available in Phase 2 (expanded to full layout later)
-    AVAILABLE_KEYS = [k for k, _ in PHASE2_KEYS]
+    AVAILABLE_KEYS = [name for name, _, _, _ in TKL_KEYS]
 
     def __init__(
         self,
@@ -96,7 +169,7 @@ class KeyboardEnv(ManipulationEnv):
         ctrl_cfg = refactor_composite_controller_config(arm_cfg, "Rover2026", ["right"])
 
         # Internal state
-        self._target_key   = "e"          # default: centre key
+        self._target_key   = "g"          # default: near keyboard centre
         self._contact_steps = 0           # debounce counter for PressKey
 
         super().__init__(
@@ -171,7 +244,7 @@ class KeyboardEnv(ManipulationEnv):
 
         # Key body IDs
         self._key_body_ids = {}
-        for key_name, _ in PHASE2_KEYS:
+        for key_name, _, _, _ in TKL_KEYS:
             body_name = f"key_{key_name}"
             self._key_body_ids[key_name] = sim.model.body_name2id(body_name)
 
@@ -334,11 +407,16 @@ class KeyboardEnv(ManipulationEnv):
 
     @staticmethod
     def _eef_tilt_from_vertical(quat_wxyz: np.ndarray) -> float:
-        """Return the angle (rad) between EEF Z-axis and world -Z (downward)."""
+        """Return the angle (rad) between the solenoid push direction and world -Z.
+
+        The Rover2026 solenoid pushes along EEF -Y in world frame (confirmed
+        by grip_site → actuator_tip_site vector pointing along world -Z when
+        the arm is in its nominal vertical configuration).
+        """
         R = KeyboardEnv._quat_to_rot(quat_wxyz)
-        eef_z_world = R[:, 2]                         # EEF Z in world
+        push_dir = -R[:, 1]                           # EEF -Y in world
         down = np.array([0, 0, -1.0])
-        cos_a = np.clip(np.dot(eef_z_world, down), -1.0, 1.0)
+        cos_a = np.clip(np.dot(push_dir, down), -1.0, 1.0)
         return float(np.arccos(cos_a))
 
     @staticmethod
@@ -376,43 +454,43 @@ class KeyboardEnv(ManipulationEnv):
 
     def _build_keyboard(self) -> ET.Element:
         """
-        Build the keyboard body tree as ElementTree elements.
-        Positions are in world space:
-          - floor is at z = 0
-          - keyboard sits at self.keyboard_height above the floor
+        Build the Redragon K552 TKL keyboard as MuJoCo XML elements.
+
+        Local frame of the keyboard body:
+          X = row direction  (neg = back / F-keys, pos = front / space)
+          Y = column direction (neg = left / Esc, pos = right / nav cluster)
+          Z = up
         """
         kx, ky = self.keyboard_offset
-        # Place keyboard body so that the slab top surface is at keyboard_height.
-        # Slab geom has half-height KEY_H, so body centre is at keyboard_height.
         kz = self.keyboard_height
 
         base = ET.Element("body")
         base.set("name", "keyboard_base")
         base.set("pos", f"{kx:.4f} {ky:.4f} {kz:.4f}")
 
-        # Base slab (collision + visual)
-        row_half_x = (len(PHASE2_KEYS) - 1) * KEY_PITCH / 2 + KEY_HALF + 0.003
+        # Base slab — covers full TKL footprint with small margin
+        slab_half_x = _KB_HEIGHT_U / 2 * KEY_PITCH + KEY_HALF + 0.003
+        slab_half_y = _KB_WIDTH_U / 2 * KEY_PITCH + KEY_HALF + 0.003
         slab = ET.SubElement(base, "geom")
         slab.set("name", "keyboard_surface")
         slab.set("type", "box")
-        slab.set("size",  f"{row_half_x:.4f} 0.014 {KEY_H:.4f}")
-        slab.set("rgba",  "0.15 0.15 0.15 1")
+        slab.set("size", f"{slab_half_x:.4f} {slab_half_y:.4f} {KEY_H:.4f}")
+        slab.set("rgba", "0.15 0.15 0.15 1")
         slab.set("contype", "1")
         slab.set("conaffinity", "1")
 
         # Individual keys
-        for key_name, col_idx in PHASE2_KEYS:
-            x_local = col_idx * KEY_PITCH
-
+        for key_name, x_local, y_local, width_u in TKL_KEYS:
             key_body = ET.SubElement(base, "body")
             key_body.set("name", f"key_{key_name}")
-            # Key sits on top of the slab: slab half-height + key half-height
-            key_body.set("pos",  f"{x_local:.4f} 0 {KEY_H * 3:.4f}")
+            key_body.set("pos", f"{x_local:.4f} {y_local:.4f} {KEY_H * 3:.4f}")
 
+            # Width varies per key; height is always 1 U
+            half_col = (width_u * KEY_PITCH - KEY_GAP) / 2
             geom = ET.SubElement(key_body, "geom")
             geom.set("name",        f"key_{key_name}_geom")
             geom.set("type",        "box")
-            geom.set("size",        f"{KEY_HALF} {KEY_HALF} {KEY_H}")
+            geom.set("size",        f"{KEY_HALF} {half_col:.4f} {KEY_H}")
             geom.set("rgba",        "0.88 0.88 0.88 1")
             geom.set("contype",     "1")
             geom.set("conaffinity", "1")
@@ -518,6 +596,105 @@ class CoarseReachEnv(KeyboardEnv):
                 and tilt < self.SUCCESS_TILT)
 
 
+class FineAlignEnv(KeyboardEnv):
+    """
+    Skill 2: Precisely center the actuator tip directly above the target key,
+    within 5mm XY error, starting from CoarseReach's end state (~3cm away).
+
+    Uses proprioceptive observations + synthesized ArUco (dx, dy, key_visible)
+    for precision alignment. Actuator is locked retracted — only 6 arm joints.
+    Episode terminates on success or after `horizon` steps (default 200).
+    """
+
+    SUCCESS_XY   = 0.005  # m — 5mm XY tolerance
+    SUCCESS_Z    = 0.015  # m — height error tolerance
+    SUCCESS_TILT = 0.15   # rad (~8.6°) — max tilt from vertical
+    HOVER_HEIGHT = CoarseReachEnv.HOVER_HEIGHT  # same hover height
+
+    # Start from known-good pose above keyboard with noise to simulate
+    # CoarseReach output (~3cm scatter)
+    ALIGNED_QPOS = CoarseReachEnv.ABOVE_KEYBOARD_QPOS.copy()
+
+    def __init__(self, random_key: bool = True, init_noise: float = 0.03,
+                 **kwargs):
+        kwargs.setdefault('horizon', 200)
+        self.random_key = random_key
+        self.init_noise = init_noise  # joint noise to simulate CoarseReach scatter
+        super().__init__(**kwargs)
+
+    def _reset_internal(self):
+        # Start near the aligned pose with small noise — CoarseReach
+        # outputs a near-vertical pose so we don't add much perturbation
+        robot = self.robots[0]
+        robot.init_qpos = self.ALIGNED_QPOS.copy()
+        robot.init_qpos += np.random.uniform(
+            -self.init_noise, self.init_noise, size=6
+        )
+
+        super()._reset_internal()
+        if self.random_key:
+            self.set_target_key(np.random.choice(self.AVAILABLE_KEYS))
+
+    def reward(self, action=None):
+        obs = self._get_observations(force_update=True)
+        pf = self.robots[0].robot_model.naming_prefix
+
+        eef_pos  = self.sim.data.site_xpos[self._eef_site_id]
+        eef_quat = obs.get(f"{pf}eef_quat", np.array([1, 0, 0, 0]))
+        key_pos  = self.sim.data.body_xpos[self._key_body_ids[self._target_key]]
+
+        xy_dist = float(np.linalg.norm(eef_pos[:2] - key_pos[:2]))
+        z_diff  = float((eef_pos[2] - key_pos[2]) - self.HOVER_HEIGHT)  # positive = above, negative = below
+        z_error = abs(z_diff)
+        tilt    = float(self._eef_tilt_from_vertical(eef_quat))
+
+        # Success — large terminal bonus + early-termination saves penalty
+        if (xy_dist < self.SUCCESS_XY and z_error < self.SUCCESS_Z
+                and tilt < self.SUCCESS_TILT):
+            return 500.0
+
+        # ArUco visibility bonus
+        aruco = obs.get("aruco_obs", np.zeros(3))
+        aruco_visible = float(aruco[2])
+
+        # Tight exponential on XY — 50x decay rate (vs 5x for CoarseReach)
+        # Peaks at 20.0 when perfectly aligned, decays to ~0 at 3cm
+        r_align = 20.0 * np.exp(-50.0 * xy_dist)
+
+        # Asymmetric height penalty — going below hover height risks collision
+        # with keys, so penalize 5x harder than being too high
+        if z_diff < 0:
+            r_height = -15.0 * z_error   # below hover → collision danger
+        else:
+            r_height = -3.0 * z_error    # above hover → just inefficient
+
+        # Orientation — light penalty; init state is already near-vertical
+        # so this just prevents drift, not a hard shaping signal
+        r_orient = -2.0 * tilt
+
+        # Small time penalty to encourage finishing quickly
+        r_time = -0.5
+
+        # Bonus for ArUco visibility
+        r_aruco = 2.0 * aruco_visible
+
+        return r_align + r_height + r_orient + r_time + r_aruco
+
+    def _check_success(self):
+        obs = self._get_observations(force_update=True)
+        pf = self.robots[0].robot_model.naming_prefix
+
+        eef_pos  = self.sim.data.site_xpos[self._eef_site_id]
+        eef_quat = obs.get(f"{pf}eef_quat", np.array([1, 0, 0, 0]))
+        key_pos  = self.sim.data.body_xpos[self._key_body_ids[self._target_key]]
+
+        xy_dist = float(np.linalg.norm(eef_pos[:2] - key_pos[:2]))
+        z_error = float(abs((eef_pos[2] - key_pos[2]) - self.HOVER_HEIGHT))
+        tilt    = float(self._eef_tilt_from_vertical(eef_quat))
+        return (xy_dist < self.SUCCESS_XY and z_error < self.SUCCESS_Z
+                and tilt < self.SUCCESS_TILT)
+
+
 class PressKeyEnv(KeyboardEnv):
     """
     Skill 3: Extend the solenoid to press the target key and hold for 3 steps.
@@ -529,48 +706,26 @@ class PressKeyEnv(KeyboardEnv):
 
     HOLD_STEPS = 3   # consecutive contact steps required for success
 
-    def __init__(self, coarse_reach_checkpoint: str | None = None,
-                 random_key: bool = True, **kwargs):
+    # Known-good joint config: arm vertical above keyboard centre.
+    # Per-key offsets are small enough that this works for all 5 keys.
+    ALIGNED_QPOS = CoarseReachEnv.ABOVE_KEYBOARD_QPOS.copy()
+
+    def __init__(self, random_key: bool = True, **kwargs):
         kwargs.setdefault('horizon', 50)
         self.random_key = random_key
-        self.coarse_reach_checkpoint = coarse_reach_checkpoint
-        self._cr_policy = None
         super().__init__(**kwargs)
-        # Load CoarseReach policy AFTER full env init (avoids init-order issues)
-        if coarse_reach_checkpoint:
-            from stable_baselines3 import SAC
-            self._cr_policy = SAC.load(coarse_reach_checkpoint)
 
     def _reset_internal(self):
+        # Teleport arm directly above the keyboard — no CoarseReach rollout
+        robot = self.robots[0]
+        robot.init_qpos = self.ALIGNED_QPOS.copy()
+        # Small noise so it's not identical every episode
+        robot.init_qpos += np.random.uniform(-0.02, 0.02, size=6)
+
         super()._reset_internal()
         self._contact_steps = 0
         if self.random_key:
             self.set_target_key(np.random.choice(self.AVAILABLE_KEYS))
-        if self._cr_policy is not None:
-            self._run_to_alignment()
-
-    def _run_to_alignment(self, max_steps: int = 300):
-        """Step with the CoarseReach policy until the EEF is above the target key."""
-        # Temporarily raise the horizon so the base env doesn't terminate mid-alignment
-        orig_horizon = self.horizon
-        self.horizon = max_steps + 10
-        try:
-            for _ in range(max_steps):
-                flat = self._flat_obs().astype(np.float32)
-                arm_action, _ = self._cr_policy.predict(flat, deterministic=True)
-                full_action = np.append(arm_action, 0.0)   # solenoid retracted
-                self.step(full_action)
-
-                eef = self.sim.data.site_xpos[self._eef_site_id]
-                key = self.sim.data.body_xpos[self._key_body_ids[self._target_key]]
-                if (np.linalg.norm(eef[:2] - key[:2]) < CoarseReachEnv.SUCCESS_XY
-                        and abs((eef[2] - key[2]) - CoarseReachEnv.HOVER_HEIGHT)
-                        < CoarseReachEnv.SUCCESS_Z):
-                    break
-        finally:
-            self.horizon = orig_horizon
-            self.timestep = 0
-            self.done = False
 
     def reward(self, action=None):
         act_pos = float(self.sim.data.qpos[self._actuator_qpos_addr])
