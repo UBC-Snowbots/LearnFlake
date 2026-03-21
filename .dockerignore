@@ -1,56 +1,70 @@
-# --- Version Control (Critical for performance) ---
-.gitignore
-.gitattributes
+# Docker build context exclusions for LearnFlake
+# Prevents copying build artifacts, logs, and problematic symlinks
 
-# --- Docker specifics ---
-Dockerfile
-docker-compose.yml
-.dockerignore
-
-# --- Python / RoboSuite junk ---
-__pycache__/
-*.py[cod]
-*$py.class
-.venv/
-venv/
-.pytest_cache/
-.ipynb_checkpoints/
-# If you have a local robosuite private macro file, ignore it if you set it up via script in Docker
-robosuite/macros.py 
-
-# --- ROS / Colcon (The 7GB killers) ---
+# Colcon build artifacts (contain symlinks that break on Windows)
 build/
 install/
 log/
-devel/
-devel_isolated/
-build_isolated/
-*.bag
-*.mcap
 
-# --- IDEs and Editor junk ---
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# IDE and editor files
 .vscode/
 .idea/
 *.swp
+*.swo
 *~
-.#*
 
-# --- Your specific ROS list ---
-network_stuff/dds_profile_cyclone.xml
-bin/
-lib/
-msg_gen/
-srv_gen/
-msg/*Action.msg
-msg/*ActionFeedback.msg
-msg/*ActionGoal.msg
-msg/*ActionResult.msg
-msg/*Feedback.msg
-msg/*Goal.msg
-msg/*Result.msg
-msg/_*.py
-srv/_*.py
-*.pcd
-qtcreator-*
-*.user
-CMakeLists.txt.user
+# Git
+.git/
+.gitmodules
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Docker files (no need to copy into context)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Documentation (optional, saves space)
+*.md
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+random_install_files/
+
+# Large binary files
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+
+# Model checkpoints (can be large)
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.pkl
+
+# Jupyter
+.ipynb_checkpoints/

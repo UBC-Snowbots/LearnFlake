@@ -7,3 +7,4 @@
 [submodule "src/external_pkgs/RoboSuite"]
 	path = src/external_pkgs/RoboSuite
 	url = git@github.com:UBC-Snowbots/robosuite.git
+	ignore = all

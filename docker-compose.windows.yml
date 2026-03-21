@@ -1,0 +1,53 @@
+# Windows/WSL2 overrides for Docker Desktop (Linux containers).
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.windows.yml up -d rover_cpu
+
+services:
+  rover:
+    network_mode: bridge
+
+  rover_rl:
+    network_mode: bridge
+    volumes:
+      - ./:/LearnFlake
+      - /mnt/wslg:/mnt/wslg
+    environment:
+      - DISPLAY=${DISPLAY}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY}
+      - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
+      - PULSE_SERVER=/mnt/wslg/PulseServer
+      - QT_X11_NO_MITSHM=1
+      - ROVERFLAKE_ROOT=/LearnFlake
+      - MUJOCO_GL=${MUJOCO_GL:-glfw}
+      - __GLX_VENDOR_LIBRARY_NAME=nvidia
+
+  rover_cpu:
+    network_mode: bridge
+    volumes:
+      - ./:/LearnFlake
+      - /mnt/wslg:/mnt/wslg
+    environment:
+      - DISPLAY=${DISPLAY}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY}
+      - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
+      - PULSE_SERVER=/mnt/wslg/PulseServer
+      - QT_X11_NO_MITSHM=1
+      - ROVERFLAKE_ROOT=/LearnFlake
+      - MUJOCO_GL=${MUJOCO_GL:-glfw}
+
+  rover_gpu:
+    network_mode: bridge
+    volumes:
+      - ./:/LearnFlake
+      - /mnt/wslg:/mnt/wslg
+    environment:
+      - DISPLAY=${DISPLAY}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY}
+      - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
+      - PULSE_SERVER=/mnt/wslg/PulseServer
+      - QT_X11_NO_MITSHM=1
+      - ROVERFLAKE_ROOT=/LearnFlake
+      - MUJOCO_GL=${MUJOCO_GL:-glfw}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - __GLX_VENDOR_LIBRARY_NAME=nvidia
