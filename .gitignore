@@ -69,8 +69,9 @@ rl/
 
 .vscode/settings.json
 
-# Ignore testing and keep in separate branch
+# Ignore testing and checkpoints and keep in separate branch (will later push only best model)
 src/rl_autonomy/testing
+src/rl_autonomy/checkpoints
 
 .venv
 src/MUJOCO_LOG.TXT
