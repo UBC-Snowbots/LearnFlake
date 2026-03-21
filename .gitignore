@@ -70,9 +70,9 @@ rl/
 .vscode/settings.json
 
 # Ignore these (will later push only best model and necessary files)
-# src/rl_autonomy/testing/
-# src/rl_autonomy/checkpoints/
-# src/rl_autonomy/documentation/
+src/rl_autonomy/testing/
+src/rl_autonomy/checkpoints/
+src/rl_autonomy/documentation/
 
 .venv
 src/MUJOCO_LOG.TXT
