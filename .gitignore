@@ -80,3 +80,6 @@ git_log_capture.txt
 
 # CLAUDE
 CLAUDE.md
+
+# cache
+src/rl_autonomy/__pycache__
