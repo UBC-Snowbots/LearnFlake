@@ -14,6 +14,6 @@ Otherwise you can just add your changes to this file:
     # Write down the name of the image you pushed and the commands you executed here in order (e.g. python -m venv rl)
 ```
 
-### Image: rover_rl
+# aaron's notes
+claude --resume 293deeb6-fd5f-4d23-8596-e94ec247f3a9
 
-docker commit <service> <myusername>/roverflake2:<TAG>

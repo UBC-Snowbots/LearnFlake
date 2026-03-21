@@ -69,10 +69,17 @@ rl/
 
 .vscode/settings.json
 
-# Ignore rl_autonomy for now
-#src/rl_autonomy/
-src/rl_autonomy/env.py
+# Ignore these (will later push only best model and necessary files)
+src/rl_autonomy/testing/
+src/rl_autonomy/checkpoints/
+src/rl_autonomy/documentation/
 
 .venv
 src/MUJOCO_LOG.TXT
 git_log_capture.txt
+
+# CLAUDE
+CLAUDE.md
+
+# cache
+src/rl_autonomy/__pycache__
