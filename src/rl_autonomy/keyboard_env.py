@@ -574,6 +574,8 @@ class CoarseReachEnv(KeyboardEnv):
         if (xy_dist < self.SUCCESS_XY and z_error < self.SUCCESS_Z
                 and tilt < self.SUCCESS_TILT):
             return 100.0
+        
+        # ADD - jitter
 
         # Reach: exponential for close range + linear for long range gradient
         r_reach  = 10.0 * np.exp(-5.0 * xy_dist) - 15.0 * xy_dist
@@ -695,59 +697,59 @@ class FineAlignEnv(KeyboardEnv):
                 and tilt < self.SUCCESS_TILT)
 
 
-class PressKeyEnv(KeyboardEnv):
-    """
-    Skill 3: Extend the solenoid to press the target key and hold for 3 steps.
+# class PressKeyEnv(KeyboardEnv):
+#     """
+#     Skill 3: Extend the solenoid to press the target key and hold for 3 steps.
 
-    Assumes the arm is already aligned above the key (CoarseReach has run).
-    Only the solenoid actuator (action[-1]) is active; arm joints are locked to 0.
-    Episode terminates on 3-step contact hold (success) or timeout (50 steps).
-    """
+#     Assumes the arm is already aligned above the key (CoarseReach has run).
+#     Only the solenoid actuator (action[-1]) is active; arm joints are locked to 0.
+#     Episode terminates on 3-step contact hold (success) or timeout (50 steps).
+#     """
 
-    HOLD_STEPS = 3   # consecutive contact steps required for success
+#     HOLD_STEPS = 3   # consecutive contact steps required for success
 
-    # Known-good joint config: arm vertical above keyboard centre.
-    # Per-key offsets are small enough that this works for all 5 keys.
-    ALIGNED_QPOS = CoarseReachEnv.ABOVE_KEYBOARD_QPOS.copy()
+#     # Known-good joint config: arm vertical above keyboard centre.
+#     # Per-key offsets are small enough that this works for all 5 keys.
+#     ALIGNED_QPOS = CoarseReachEnv.ABOVE_KEYBOARD_QPOS.copy()
 
-    def __init__(self, random_key: bool = True, **kwargs):
-        kwargs.setdefault('horizon', 50)
-        self.random_key = random_key
-        super().__init__(**kwargs)
+#     def __init__(self, random_key: bool = True, **kwargs):
+#         kwargs.setdefault('horizon', 50)
+#         self.random_key = random_key
+#         super().__init__(**kwargs)
 
-    def _reset_internal(self):
-        # Teleport arm directly above the keyboard — no CoarseReach rollout
-        robot = self.robots[0]
-        robot.init_qpos = self.ALIGNED_QPOS.copy()
-        # Small noise so it's not identical every episode
-        robot.init_qpos += np.random.uniform(-0.02, 0.02, size=6)
+#     def _reset_internal(self):
+#         # Teleport arm directly above the keyboard — no CoarseReach rollout
+#         robot = self.robots[0]
+#         robot.init_qpos = self.ALIGNED_QPOS.copy()
+#         # Small noise so it's not identical every episode
+#         robot.init_qpos += np.random.uniform(-0.02, 0.02, size=6)
 
-        super()._reset_internal()
-        self._contact_steps = 0
-        if self.random_key:
-            self.set_target_key(np.random.choice(self.AVAILABLE_KEYS))
+#         super()._reset_internal()
+#         self._contact_steps = 0
+#         if self.random_key:
+#             self.set_target_key(np.random.choice(self.AVAILABLE_KEYS))
 
-    def reward(self, action=None):
-        act_pos = float(self.sim.data.qpos[self._actuator_qpos_addr])
-        act_vel = float(self.sim.data.qvel[self._actuator_qvel_addr])
-        force   = float(np.linalg.norm(
-            self.sim.data.cfrc_ext[self._actuator_body_id][3:]
-        ))
+#     def reward(self, action=None):
+#         act_pos = float(self.sim.data.qpos[self._actuator_qpos_addr])
+#         act_vel = float(self.sim.data.qvel[self._actuator_qvel_addr])
+#         force   = float(np.linalg.norm(
+#             self.sim.data.cfrc_ext[self._actuator_body_id][3:]
+#         ))
 
-        contact = (force > CONTACT_FORCE_THRESHOLD
-                   and abs(act_vel) < STALL_VEL_THRESHOLD)
+#         contact = (force > CONTACT_FORCE_THRESHOLD
+#                    and abs(act_vel) < STALL_VEL_THRESHOLD)
 
-        if contact:
-            self._contact_steps += 1
-            if self._contact_steps >= self.HOLD_STEPS:
-                return 1000.0
-            return 500.0
-        else:
-            self._contact_steps = 0
+#         if contact:
+#             self._contact_steps += 1
+#             if self._contact_steps >= self.HOLD_STEPS:
+#                 return 1000.0
+#             return 500.0
+#         else:
+#             self._contact_steps = 0
 
-        r_extend   = 5.0 * act_pos
-        r_stability = -2.0 * float(np.linalg.norm(action[:6])) if action is not None else 0.0
-        return r_extend + r_stability
+#         r_extend   = 5.0 * act_pos
+#         r_stability = -2.0 * float(np.linalg.norm(action[:6])) if action is not None else 0.0
+#         return r_extend + r_stability
 
-    def _check_success(self):
-        return self._contact_steps >= self.HOLD_STEPS
+#     def _check_success(self):
+#         return self._contact_steps >= self.HOLD_STEPS

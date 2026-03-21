@@ -230,6 +230,7 @@ def evaluate(model_path: str, n_episodes: int, render: bool):
         print(f"  ep {ep+1:3d}/{n_episodes}  key={key}  reward={ep_reward:7.1f}  "
               f"xy={xy*100:5.2f}cm  z_err={ze*100:5.2f}cm  tilt={np.degrees(tlt):5.1f}°  {status}")
 
+
     print(f"\nSuccess rate: {successes}/{n_episodes} = {100*successes/n_episodes:.1f}%")
     print(f"Final distances (mean ± std):")
     print(f"  XY:   {np.mean(all_xy)*100:5.2f} ± {np.std(all_xy)*100:5.2f} cm")

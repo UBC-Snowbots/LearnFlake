@@ -69,9 +69,8 @@ rl/
 
 .vscode/settings.json
 
-# Ignore rl_autonomy for now
-#src/rl_autonomy/
-src/rl_autonomy/env.py
+# Ignore testing and keep in separate branch
+src/rl_autonomy/testing
 
 .venv
 src/MUJOCO_LOG.TXT
