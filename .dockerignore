@@ -59,6 +59,7 @@ random_install_files/
 *.rar
 *.7z
 doc.md
+*.mp4
 
 # Model checkpoints (can be large)
 *.pt

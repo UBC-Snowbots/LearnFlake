@@ -67,6 +67,16 @@ rl/
 **/.vscode/
 **/TODO.md
 
+# Ignore all .md files everywhere, then whitelist specific root ones
+*.md
+!AdvDocker.md
+!DOCKER_WINDOWS.md
+!Docker.md
+!README.md
+!RECENT.md
+
+*.mp4
+
 .vscode/settings.json
 
 # Ignore rl_autonomy for now
@@ -85,3 +95,7 @@ doc.md
 src/rl_autonomy/rl_agent_pranav/HRL-system/Alpha/rover2026_rlkit/videos/*.mp4
 src/rl_autonomy/rl_agent_pranav/HRL-system/Alpha/rover2026_rlkit/doc.md
 src/rl_autonomy/rl_agent_pranav/HRL-system/Alpha/rover2026_rlkit/REPORT.md
+
+# Ignore machine-local agent notes, but keep the shared root AGENTS.md tracked
+AGENTS.local.md
+*.agent.md

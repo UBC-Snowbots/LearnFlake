@@ -1,0 +1,9 @@
+numpy
+gymnasium
+transitions
+
+[sb3]
+stable-baselines3
+tqdm
+
+[torch]

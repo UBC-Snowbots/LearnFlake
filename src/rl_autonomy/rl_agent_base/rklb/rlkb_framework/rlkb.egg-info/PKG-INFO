@@ -1,3 +1,17 @@
+Metadata-Version: 2.4
+Name: rlkb
+Version: 0.1.0
+Summary: Reinforcement learning keyboard control framework scaffold
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: numpy
+Requires-Dist: gymnasium
+Requires-Dist: transitions
+Provides-Extra: torch
+Provides-Extra: sb3
+Requires-Dist: stable-baselines3; extra == "sb3"
+Requires-Dist: tqdm; extra == "sb3"
+
 # rlkb framework
 
 Minimal reinforcement learning scaffold for keyboard-style control of a rover arm. The framework keeps clear boundaries:

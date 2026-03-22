@@ -1,0 +1,2 @@
+[console_scripts]
+rlkb-decider = rlkb.scripts.run_decider:main
