@@ -1,76 +1,43 @@
-"""
-Visualize the Gaming_Keyboard OBJ mesh in a MuJoCo viewer.
-
-Loads the OBJ from meshes/, scales it to real-world dimensions,
-and displays it on a table surface using the MuJoCo interactive viewer.
-
-Usage
------
-    python testing_meshes.py
-"""
-
 import os
-import mujoco
-import mujoco.viewer
+import sys
 
-MESH_DIR = os.path.join(os.path.dirname(__file__), "..", "meshes")
-OBJ_PATH = os.path.join(MESH_DIR, "Gaming_Keyboard.obj")
+sys.path.insert(
+    0, os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+)
 
-# The OBJ is in mm-scale coords (~654 x 2004 x 160 units).
-# A real Redragon K552 TKL is roughly 0.355 x 0.130 x 0.035 m.
-# The mesh's longest axis (Z in OBJ) maps to keyboard width (~355mm).
-# Scale factor: 0.355 / 2004 ≈ 0.000177
-MESH_SCALE = 0.000177
-
-MJCF_XML = f"""
-<mujoco model="keyboard_viewer">
-  <compiler meshdir="{MESH_DIR}"/>
-
-  <asset>
-    <mesh name="keyboard_mesh"
-          file="Gaming_Keyboard.stl"
-          scale="{MESH_SCALE} {MESH_SCALE} {MESH_SCALE}"
-          inertia="shell"/>
-    <texture name="grid" type="2d" builtin="checker"
-             width="512" height="512"
-             rgb1="0.9 0.9 0.9" rgb2="0.7 0.7 0.7"/>
-    <material name="floor_mat" texture="grid"
-              texrepeat="4 4" reflectance="0.1"/>
-    <material name="keyboard_mat"
-              rgba="0.85 0.85 0.85 1"
-              specular="0.5" shininess="0.8"/>
-  </asset>
-
-  <worldbody>
-    <light pos="0 0 1.5" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
-    <light pos="0.5 0.5 1.0" dir="-0.5 -0.5 -1" diffuse="0.4 0.4 0.4"/>
-
-    <!-- Floor -->
-    <geom type="plane" size="1 1 0.01" material="floor_mat"/>
-
-    <!-- Table surface -->
-    <geom name="table" type="box" pos="0 0 0.4" size="0.4 0.3 0.02"
-          rgba="0.45 0.3 0.2 1"/>
-
-    <!-- Keyboard mesh (static geom in worldbody — no inertia needed) -->
-    <geom name="keyboard" type="mesh" mesh="keyboard_mesh"
-          pos="0 0 0.425" material="keyboard_mat"
-          contype="0" conaffinity="0"/>
-  </worldbody>
-</mujoco>
-"""
+from keyboard_env import KeyboardEnv
 
 
 def main():
-    """Load the keyboard mesh in MuJoCo and launch the interactive viewer."""
-    if not os.path.exists(OBJ_PATH):
-        raise FileNotFoundError(f"Keyboard mesh not found: {OBJ_PATH}")
+    """Build the environment and launch the interactive viewer."""
+    env = KeyboardEnv(
+        render=False,
+        randomize_keyboard_pos=False,
+        log_contacts=True,
+        horizon=100000,
+    )
+    env.reset()
 
-    model = mujoco.MjModel.from_xml_string(MJCF_XML)
-    data = mujoco.MjData(model)
+    import mujoco.viewer
+    model = env.sim.model._model
+    data = env.sim.data._data
 
-    print("Launching MuJoCo viewer — close the window to exit.")
-    mujoco.viewer.launch(model, data)
+    with mujoco.viewer.launch_passive(model, data) as viewer:
+        viewer.cam.type = 0
+        viewer.cam.lookat[:] = [-0.15, 0.0, 0.15]
+        viewer.cam.distance = 0.8
+        viewer.cam.azimuth = 180
+        viewer.cam.elevation = -30
+
+        print("Viewer open — drag to rotate, scroll to zoom.")
+        print("Keys are pressable — push them down with the actuator.")
+        print("Close the window to exit.")
+
+        while viewer.is_running():
+            env.step([0] * 7)
+            viewer.sync()
+
+    env.close()
 
 
 if __name__ == "__main__":
