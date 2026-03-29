@@ -1,0 +1,14 @@
+path: /LearnFlake/src/rl_autonomy/rl_agent_pranav/HRL-system/Alpha/rover2026_rlkit/yolo_datasets/keypad_keys
+train: images/train
+val: images/val
+names:
+  0: '0'
+  1: '1'
+  2: '2'
+  3: '3'
+  4: '4'
+  5: '5'
+  6: '6'
+  7: '7'
+  8: '8'
+  9: '9'

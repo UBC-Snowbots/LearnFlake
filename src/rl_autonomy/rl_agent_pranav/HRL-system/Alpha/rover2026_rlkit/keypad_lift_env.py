@@ -20,7 +20,7 @@ from robosuite.environments.manipulation.lift import Lift
 from robosuite.models.objects import BoxObject
 from robosuite.models.tasks import ManipulationTask
 
-from rlkb.decider.layouts import DEFAULT_KEY_LAYOUT
+from layout_compat import DEFAULT_KEY_LAYOUT
 
 # Key visual appearance
 KEY_COLORS: Dict[str, Tuple[float, float, float, float]] = {

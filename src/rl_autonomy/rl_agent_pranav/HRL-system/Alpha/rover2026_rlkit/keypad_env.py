@@ -30,7 +30,7 @@ from robosuite.controllers.composite.composite_controller_factory import (
 
 from keypad_lift_env import KeypadLift
 from reach_env import RoverReachEnvConfig
-from rlkb.decider.layouts import DEFAULT_KEY_LAYOUT
+from layout_compat import DEFAULT_KEY_LAYOUT
 
 
 @dataclass
