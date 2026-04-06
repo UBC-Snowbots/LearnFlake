@@ -697,59 +697,590 @@ class FineAlignEnv(KeyboardEnv):
                 and tilt < self.SUCCESS_TILT)
 
 
-# class PressKeyEnv(KeyboardEnv):
-#     """
-#     Skill 3: Extend the solenoid to press the target key and hold for 3 steps.
+class PressKeyEnv(KeyboardEnv):
+    """
+    Skill 3: Extend the solenoid to press the target key and hold for 3 steps.
 
-#     Assumes the arm is already aligned above the key (CoarseReach has run).
-#     Only the solenoid actuator (action[-1]) is active; arm joints are locked to 0.
-#     Episode terminates on 3-step contact hold (success) or timeout (50 steps).
-#     """
+    Assumes the arm is already aligned above the key (FineAlign has run).
+    Only the solenoid actuator (action[-1]) is active; arm joints are locked to 0.
+    Episode terminates on 3-step contact hold (success) or timeout (50 steps).
+    """
 
-#     HOLD_STEPS = 3   # consecutive contact steps required for success
+    HOLD_STEPS = 3   # consecutive contact steps required for success
 
-#     # Known-good joint config: arm vertical above keyboard centre.
-#     # Per-key offsets are small enough that this works for all 5 keys.
-#     ALIGNED_QPOS = CoarseReachEnv.ABOVE_KEYBOARD_QPOS.copy()
+    # Known-good joint config: arm vertical above keyboard centre.
+    ALIGNED_QPOS = CoarseReachEnv.ABOVE_KEYBOARD_QPOS.copy()
 
-#     def __init__(self, random_key: bool = True, **kwargs):
-#         kwargs.setdefault('horizon', 50)
-#         self.random_key = random_key
-#         super().__init__(**kwargs)
+    def __init__(self, random_key: bool = True, **kwargs):
+        kwargs.setdefault('horizon', 50)
+        self.random_key = random_key
+        super().__init__(**kwargs)
 
-#     def _reset_internal(self):
-#         # Teleport arm directly above the keyboard — no CoarseReach rollout
-#         robot = self.robots[0]
-#         robot.init_qpos = self.ALIGNED_QPOS.copy()
-#         # Small noise so it's not identical every episode
-#         robot.init_qpos += np.random.uniform(-0.02, 0.02, size=6)
+    def _reset_internal(self):
+        robot = self.robots[0]
+        robot.init_qpos = self.ALIGNED_QPOS.copy()
+        robot.init_qpos += np.random.uniform(-0.02, 0.02, size=6)
 
-#         super()._reset_internal()
-#         self._contact_steps = 0
-#         if self.random_key:
-#             self.set_target_key(np.random.choice(self.AVAILABLE_KEYS))
+        super()._reset_internal()
+        self._contact_steps = 0
+        if self.random_key:
+            self.set_target_key(np.random.choice(self.AVAILABLE_KEYS))
 
-#     def reward(self, action=None):
-#         act_pos = float(self.sim.data.qpos[self._actuator_qpos_addr])
-#         act_vel = float(self.sim.data.qvel[self._actuator_qvel_addr])
-#         force   = float(np.linalg.norm(
-#             self.sim.data.cfrc_ext[self._actuator_body_id][3:]
-#         ))
+    def reward(self, action=None):
+        act_pos = float(self.sim.data.qpos[self._actuator_qpos_addr])
+        act_vel = float(self.sim.data.qvel[self._actuator_qvel_addr])
+        force   = float(np.linalg.norm(
+            self.sim.data.cfrc_ext[self._actuator_body_id][3:]
+        ))
 
-#         contact = (force > CONTACT_FORCE_THRESHOLD
-#                    and abs(act_vel) < STALL_VEL_THRESHOLD)
+        contact = (force > CONTACT_FORCE_THRESHOLD
+                   and abs(act_vel) < STALL_VEL_THRESHOLD)
 
-#         if contact:
-#             self._contact_steps += 1
-#             if self._contact_steps >= self.HOLD_STEPS:
-#                 return 1000.0
-#             return 500.0
-#         else:
-#             self._contact_steps = 0
+        if contact:
+            self._contact_steps += 1
+            if self._contact_steps >= self.HOLD_STEPS:
+                return 1000.0
+            return 500.0
+        else:
+            self._contact_steps = 0
 
-#         r_extend   = 5.0 * act_pos
-#         r_stability = -2.0 * float(np.linalg.norm(action[:6])) if action is not None else 0.0
-#         return r_extend + r_stability
+        r_extend   = 5.0 * act_pos
+        r_stability = -2.0 * float(np.linalg.norm(action[:6])) if action is not None else 0.0
+        return r_extend + r_stability
 
-#     def _check_success(self):
-#         return self._contact_steps >= self.HOLD_STEPS
+    def _check_success(self):
+        return self._contact_steps >= self.HOLD_STEPS
+
+
+class FinePressEnv(KeyboardEnv):
+    """
+    Fine press: precise center-of-key contact with force control.
+
+    Tighter init from FineAlign output (±0.01 joint noise), requires 5
+    consecutive hold steps, and penalizes off-center contact (XY drift
+    during press) and force overshoot beyond the contact threshold.
+    """
+
+    HOLD_STEPS = 5
+    SUCCESS_XY = 0.003     # m — must stay within 3mm of key center during press
+    MAX_FORCE  = 8.0       # N — penalize force overshoot above this
+
+    ALIGNED_QPOS = CoarseReachEnv.ABOVE_KEYBOARD_QPOS.copy()
+
+    def __init__(self, random_key: bool = True, **kwargs):
+        kwargs.setdefault('horizon', 80)
+        self.random_key = random_key
+        super().__init__(**kwargs)
+
+    def _reset_internal(self):
+        robot = self.robots[0]
+        robot.init_qpos = self.ALIGNED_QPOS.copy()
+        robot.init_qpos += np.random.uniform(-0.01, 0.01, size=6)
+
+        super()._reset_internal()
+        self._contact_steps = 0
+        if self.random_key:
+            self.set_target_key(np.random.choice(self.AVAILABLE_KEYS))
+
+    def reward(self, action=None):
+        act_pos = float(self.sim.data.qpos[self._actuator_qpos_addr])
+        act_vel = float(self.sim.data.qvel[self._actuator_qvel_addr])
+        force   = float(np.linalg.norm(
+            self.sim.data.cfrc_ext[self._actuator_body_id][3:]
+        ))
+
+        # XY drift during press
+        eef_pos = self.sim.data.site_xpos[self._eef_site_id]
+        key_pos = self.sim.data.body_xpos[self._key_body_ids[self._target_key]]
+        xy_drift = float(np.linalg.norm(eef_pos[:2] - key_pos[:2]))
+
+        contact = (force > CONTACT_FORCE_THRESHOLD
+                   and abs(act_vel) < STALL_VEL_THRESHOLD)
+
+        if contact:
+            self._contact_steps += 1
+            if self._contact_steps >= self.HOLD_STEPS:
+                # Bonus scaled by centering precision
+                centering_bonus = 200.0 * np.exp(-100.0 * xy_drift)
+                return 1000.0 + centering_bonus
+            return 500.0
+        else:
+            self._contact_steps = 0
+
+        r_extend    = 5.0 * act_pos
+        r_stability = -2.0 * float(np.linalg.norm(action[:6])) if action is not None else 0.0
+        r_center    = -20.0 * xy_drift  # penalize XY drift during approach
+        r_force_overshoot = -2.0 * max(0.0, force - self.MAX_FORCE)
+
+        return r_extend + r_stability + r_center + r_force_overshoot
+
+    def _check_success(self):
+        return self._contact_steps >= self.HOLD_STEPS
+
+
+class RetractEnv(KeyboardEnv):
+    """
+    Skill 4: Retract solenoid and lift EEF back to hover height after pressing.
+
+    Starts from a post-press state (solenoid extended, arm near key surface).
+    Actions: 6 arm joints + 1 solenoid command (7-dim).
+    Success: solenoid fully retracted AND EEF back at hover height AND minimal tilt.
+    Episode terminates on success or after `horizon` steps (default 100).
+    """
+
+    SUCCESS_Z     = 0.015   # m — height error tolerance from hover
+    SUCCESS_TILT  = 0.15    # rad — max tilt from vertical
+    HOVER_HEIGHT  = CoarseReachEnv.HOVER_HEIGHT
+    RETRACT_THRESHOLD = 0.005  # m — solenoid position below this = retracted
+
+    ALIGNED_QPOS = CoarseReachEnv.ABOVE_KEYBOARD_QPOS.copy()
+
+    def __init__(self, random_key: bool = True, **kwargs):
+        kwargs.setdefault('horizon', 100)
+        self.random_key = random_key
+        super().__init__(**kwargs)
+
+    def _reset_internal(self):
+        robot = self.robots[0]
+        robot.init_qpos = self.ALIGNED_QPOS.copy()
+        # Small noise to simulate post-press arm variation
+        robot.init_qpos += np.random.uniform(-0.02, 0.02, size=6)
+
+        super()._reset_internal()
+        self._contact_steps = 0
+
+        # Simulate post-press state: extend the solenoid at reset
+        self.sim.data.qpos[self._actuator_qpos_addr] = 0.03  # extended
+        self.sim.forward()
+
+        if self.random_key:
+            self.set_target_key(np.random.choice(self.AVAILABLE_KEYS))
+
+    def reward(self, action=None):
+        obs = self._get_observations(force_update=True)
+        pf = self.robots[0].robot_model.naming_prefix
+
+        eef_pos  = self.sim.data.site_xpos[self._eef_site_id]
+        eef_quat = obs.get(f"{pf}eef_quat", np.array([1, 0, 0, 0]))
+        key_pos  = self.sim.data.body_xpos[self._key_body_ids[self._target_key]]
+
+        act_pos = float(self.sim.data.qpos[self._actuator_qpos_addr])
+        z_error = float(abs((eef_pos[2] - key_pos[2]) - self.HOVER_HEIGHT))
+        tilt    = float(self._eef_tilt_from_vertical(eef_quat))
+        retracted = act_pos < self.RETRACT_THRESHOLD
+
+        # Success: solenoid retracted + back at hover height + upright
+        if retracted and z_error < self.SUCCESS_Z and tilt < self.SUCCESS_TILT:
+            return 200.0
+
+        # Reward shaping
+        r_retract = 10.0 * (0.03 - act_pos) / 0.03  # max 10 when fully retracted
+        r_height  = -5.0 * z_error
+        r_orient  = -2.0 * tilt
+        r_time    = -0.5
+
+        # Penalty for contact force — we want to lift off cleanly
+        force = float(np.linalg.norm(
+            self.sim.data.cfrc_ext[self._actuator_body_id][3:]
+        ))
+        r_contact = -3.0 * min(force / CONTACT_FORCE_THRESHOLD, 1.0)
+
+        return r_retract + r_height + r_orient + r_time + r_contact
+
+    def _check_success(self):
+        obs = self._get_observations(force_update=True)
+        pf = self.robots[0].robot_model.naming_prefix
+
+        eef_pos  = self.sim.data.site_xpos[self._eef_site_id]
+        eef_quat = obs.get(f"{pf}eef_quat", np.array([1, 0, 0, 0]))
+        key_pos  = self.sim.data.body_xpos[self._key_body_ids[self._target_key]]
+
+        act_pos = float(self.sim.data.qpos[self._actuator_qpos_addr])
+        z_error = float(abs((eef_pos[2] - key_pos[2]) - self.HOVER_HEIGHT))
+        tilt    = float(self._eef_tilt_from_vertical(eef_quat))
+
+        return (act_pos < self.RETRACT_THRESHOLD
+                and z_error < self.SUCCESS_Z
+                and tilt < self.SUCCESS_TILT)
+
+
+class FineRetractEnv(KeyboardEnv):
+    """
+    Fine retract: precise hover recovery with smooth, jerk-free motion.
+
+    Tighter tolerances than RetractEnv (1cm height, 0.1 rad tilt), penalizes
+    jerky motion (large action deltas), and requires near-zero EEF velocity
+    at termination to ensure a stable handoff to Traverse.
+    """
+
+    SUCCESS_Z          = 0.010   # m — tighter than coarse (1cm vs 1.5cm)
+    SUCCESS_TILT       = 0.10    # rad — tighter (~5.7° vs ~8.6°)
+    SUCCESS_VEL        = 0.02    # m/s — EEF must be nearly stationary
+    HOVER_HEIGHT       = CoarseReachEnv.HOVER_HEIGHT
+    RETRACT_THRESHOLD  = 0.003   # m — stricter retraction check
+
+    ALIGNED_QPOS = CoarseReachEnv.ABOVE_KEYBOARD_QPOS.copy()
+
+    def __init__(self, random_key: bool = True, **kwargs):
+        kwargs.setdefault('horizon', 120)
+        self.random_key = random_key
+        self._prev_action = None
+        super().__init__(**kwargs)
+
+    def _reset_internal(self):
+        robot = self.robots[0]
+        robot.init_qpos = self.ALIGNED_QPOS.copy()
+        robot.init_qpos += np.random.uniform(-0.02, 0.02, size=6)
+
+        super()._reset_internal()
+        self._contact_steps = 0
+        self._prev_action = None
+
+        # Simulate post-press state
+        self.sim.data.qpos[self._actuator_qpos_addr] = 0.03
+        self.sim.forward()
+
+        if self.random_key:
+            self.set_target_key(np.random.choice(self.AVAILABLE_KEYS))
+
+    def reward(self, action=None):
+        obs = self._get_observations(force_update=True)
+        pf = self.robots[0].robot_model.naming_prefix
+
+        eef_pos  = self.sim.data.site_xpos[self._eef_site_id]
+        eef_quat = obs.get(f"{pf}eef_quat", np.array([1, 0, 0, 0]))
+        eef_vel  = obs.get(f"{pf}joint_vel", np.zeros(6))
+        key_pos  = self.sim.data.body_xpos[self._key_body_ids[self._target_key]]
+
+        act_pos  = float(self.sim.data.qpos[self._actuator_qpos_addr])
+        z_error  = float(abs((eef_pos[2] - key_pos[2]) - self.HOVER_HEIGHT))
+        tilt     = float(self._eef_tilt_from_vertical(eef_quat))
+        retracted = act_pos < self.RETRACT_THRESHOLD
+        vel_mag  = float(np.linalg.norm(eef_vel))
+
+        # Success: retracted + hover + upright + stationary
+        if (retracted and z_error < self.SUCCESS_Z
+                and tilt < self.SUCCESS_TILT and vel_mag < self.SUCCESS_VEL):
+            return 300.0
+
+        r_retract = 10.0 * (0.03 - act_pos) / 0.03
+        r_height  = -5.0 * z_error
+        r_orient  = -3.0 * tilt
+        r_time    = -0.5
+
+        # Smoothness: penalize action jerk (difference from previous action)
+        r_jerk = 0.0
+        if self._prev_action is not None and action is not None:
+            delta = np.array(action) - self._prev_action
+            r_jerk = -1.0 * float(np.linalg.norm(delta))
+        if action is not None:
+            self._prev_action = np.array(action)
+
+        # Penalize contact force
+        force = float(np.linalg.norm(
+            self.sim.data.cfrc_ext[self._actuator_body_id][3:]
+        ))
+        r_contact = -3.0 * min(force / CONTACT_FORCE_THRESHOLD, 1.0)
+
+        # Settling bonus: reward low velocity near target state
+        r_settle = -2.0 * vel_mag
+
+        return r_retract + r_height + r_orient + r_time + r_jerk + r_contact + r_settle
+
+    def _check_success(self):
+        obs = self._get_observations(force_update=True)
+        pf = self.robots[0].robot_model.naming_prefix
+
+        eef_pos  = self.sim.data.site_xpos[self._eef_site_id]
+        eef_quat = obs.get(f"{pf}eef_quat", np.array([1, 0, 0, 0]))
+        eef_vel  = obs.get(f"{pf}joint_vel", np.zeros(6))
+        key_pos  = self.sim.data.body_xpos[self._key_body_ids[self._target_key]]
+
+        act_pos  = float(self.sim.data.qpos[self._actuator_qpos_addr])
+        z_error  = float(abs((eef_pos[2] - key_pos[2]) - self.HOVER_HEIGHT))
+        tilt     = float(self._eef_tilt_from_vertical(eef_quat))
+        vel_mag  = float(np.linalg.norm(eef_vel))
+
+        return (act_pos < self.RETRACT_THRESHOLD
+                and z_error < self.SUCCESS_Z
+                and tilt < self.SUCCESS_TILT
+                and vel_mag < self.SUCCESS_VEL)
+
+
+class TraverseEnv(KeyboardEnv):
+    """
+    Skill 5: Move laterally from one key to another at hover height.
+
+    Starts hovering above a random source key, must reach hover position above
+    a different random target key. This is faster than CoarseReach because
+    the arm is already at the correct height and orientation — it just needs
+    to slide laterally.
+
+    Actions: 6 arm joints (solenoid locked retracted).
+    Success: EEF within 3cm XY of target key at correct hover height.
+    The subsequent FineAlign skill handles the last cm of precision.
+    Episode terminates on success or after `horizon` steps (default 200).
+    """
+
+    SUCCESS_XY   = 0.03    # m — hand off to FineAlign at this tolerance
+    SUCCESS_Z    = 0.015   # m — height error tolerance
+    SUCCESS_TILT = 0.15    # rad — max tilt from vertical
+    HOVER_HEIGHT = CoarseReachEnv.HOVER_HEIGHT
+    MIN_Z        = 0.03    # m — minimum height above key (collision safety)
+
+    ALIGNED_QPOS = CoarseReachEnv.ABOVE_KEYBOARD_QPOS.copy()
+
+    def __init__(self, random_key: bool = True, **kwargs):
+        kwargs.setdefault('horizon', 200)
+        self.random_key = random_key
+        self._source_key = "g"
+        super().__init__(**kwargs)
+
+    def _reset_internal(self):
+        robot = self.robots[0]
+        robot.init_qpos = self.ALIGNED_QPOS.copy()
+        robot.init_qpos += np.random.uniform(-0.03, 0.03, size=6)
+
+        super()._reset_internal()
+
+        if self.random_key:
+            # Pick two different keys: source (where we are) and target (where to go)
+            keys = self.AVAILABLE_KEYS
+            src, tgt = np.random.choice(keys, size=2, replace=False)
+            self._source_key = src
+            self.set_target_key(tgt)
+
+    def reward(self, action=None):
+        obs = self._get_observations(force_update=True)
+        pf = self.robots[0].robot_model.naming_prefix
+
+        eef_pos  = self.sim.data.site_xpos[self._eef_site_id]
+        eef_quat = obs.get(f"{pf}eef_quat", np.array([1, 0, 0, 0]))
+        key_pos  = self.sim.data.body_xpos[self._key_body_ids[self._target_key]]
+
+        xy_dist = float(np.linalg.norm(eef_pos[:2] - key_pos[:2]))
+        z_above_key = float(eef_pos[2] - key_pos[2])
+        z_error = float(abs(z_above_key - self.HOVER_HEIGHT))
+        tilt    = float(self._eef_tilt_from_vertical(eef_quat))
+
+        # Success
+        if (xy_dist < self.SUCCESS_XY and z_error < self.SUCCESS_Z
+                and tilt < self.SUCCESS_TILT):
+            return 100.0
+
+        # XY approach reward — exponential + linear gradient
+        r_reach  = 10.0 * np.exp(-5.0 * xy_dist) - 10.0 * xy_dist
+
+        # Height maintenance — penalize deviations from hover, especially dipping
+        if z_above_key < self.MIN_Z:
+            r_height = -20.0 * (self.MIN_Z - z_above_key)  # harsh collision penalty
+        else:
+            r_height = -3.0 * z_error
+
+        r_orient = -2.0 * tilt
+        r_time   = -0.3
+
+        return r_reach + r_height + r_orient + r_time
+
+    def _check_success(self):
+        obs = self._get_observations(force_update=True)
+        pf = self.robots[0].robot_model.naming_prefix
+
+        eef_pos  = self.sim.data.site_xpos[self._eef_site_id]
+        eef_quat = obs.get(f"{pf}eef_quat", np.array([1, 0, 0, 0]))
+        key_pos  = self.sim.data.body_xpos[self._key_body_ids[self._target_key]]
+
+        xy_dist = float(np.linalg.norm(eef_pos[:2] - key_pos[:2]))
+        z_error = float(abs((eef_pos[2] - key_pos[2]) - self.HOVER_HEIGHT))
+        tilt    = float(self._eef_tilt_from_vertical(eef_quat))
+        return (xy_dist < self.SUCCESS_XY and z_error < self.SUCCESS_Z
+                and tilt < self.SUCCESS_TILT)
+
+
+class FineTraverseEnv(KeyboardEnv):
+    """
+    Fine traverse: precise key-to-key movement with tight tolerances.
+
+    Success within 1cm XY (vs 3cm coarse), tighter height/tilt, and rewards
+    smooth lateral movement. Penalizes jerk to produce trajectories that
+    hand off cleanly to FineAlign.
+    """
+
+    SUCCESS_XY   = 0.010   # m — 1cm (vs 3cm coarse)
+    SUCCESS_Z    = 0.010   # m
+    SUCCESS_TILT = 0.10    # rad
+    HOVER_HEIGHT = CoarseReachEnv.HOVER_HEIGHT
+    MIN_Z        = 0.03    # m — collision safety floor
+
+    ALIGNED_QPOS = CoarseReachEnv.ABOVE_KEYBOARD_QPOS.copy()
+
+    def __init__(self, random_key: bool = True, **kwargs):
+        kwargs.setdefault('horizon', 250)
+        self.random_key = random_key
+        self._source_key = "g"
+        self._prev_action = None
+        super().__init__(**kwargs)
+
+    def _reset_internal(self):
+        robot = self.robots[0]
+        robot.init_qpos = self.ALIGNED_QPOS.copy()
+        robot.init_qpos += np.random.uniform(-0.02, 0.02, size=6)
+
+        super()._reset_internal()
+        self._prev_action = None
+
+        if self.random_key:
+            keys = self.AVAILABLE_KEYS
+            src, tgt = np.random.choice(keys, size=2, replace=False)
+            self._source_key = src
+            self.set_target_key(tgt)
+
+    def reward(self, action=None):
+        obs = self._get_observations(force_update=True)
+        pf = self.robots[0].robot_model.naming_prefix
+
+        eef_pos  = self.sim.data.site_xpos[self._eef_site_id]
+        eef_quat = obs.get(f"{pf}eef_quat", np.array([1, 0, 0, 0]))
+        key_pos  = self.sim.data.body_xpos[self._key_body_ids[self._target_key]]
+
+        xy_dist     = float(np.linalg.norm(eef_pos[:2] - key_pos[:2]))
+        z_above_key = float(eef_pos[2] - key_pos[2])
+        z_error     = float(abs(z_above_key - self.HOVER_HEIGHT))
+        tilt        = float(self._eef_tilt_from_vertical(eef_quat))
+
+        if (xy_dist < self.SUCCESS_XY and z_error < self.SUCCESS_Z
+                and tilt < self.SUCCESS_TILT):
+            return 200.0
+
+        r_reach = 15.0 * np.exp(-10.0 * xy_dist) - 10.0 * xy_dist
+
+        if z_above_key < self.MIN_Z:
+            r_height = -20.0 * (self.MIN_Z - z_above_key)
+        else:
+            r_height = -5.0 * z_error
+
+        r_orient = -3.0 * tilt
+        r_time   = -0.3
+
+        r_jerk = 0.0
+        if self._prev_action is not None and action is not None:
+            delta = np.array(action) - self._prev_action
+            r_jerk = -0.5 * float(np.linalg.norm(delta))
+        if action is not None:
+            self._prev_action = np.array(action)
+
+        return r_reach + r_height + r_orient + r_time + r_jerk
+
+    def _check_success(self):
+        obs = self._get_observations(force_update=True)
+        pf = self.robots[0].robot_model.naming_prefix
+
+        eef_pos  = self.sim.data.site_xpos[self._eef_site_id]
+        eef_quat = obs.get(f"{pf}eef_quat", np.array([1, 0, 0, 0]))
+        key_pos  = self.sim.data.body_xpos[self._key_body_ids[self._target_key]]
+
+        xy_dist = float(np.linalg.norm(eef_pos[:2] - key_pos[:2]))
+        z_error = float(abs((eef_pos[2] - key_pos[2]) - self.HOVER_HEIGHT))
+        tilt    = float(self._eef_tilt_from_vertical(eef_quat))
+        return (xy_dist < self.SUCCESS_XY and z_error < self.SUCCESS_Z
+                and tilt < self.SUCCESS_TILT)
+
+
+# ===========================================================================
+# Domain Randomization Wrapper
+# ===========================================================================
+
+class DomainRandWrapper:
+    """
+    Wraps any KeyboardEnv subclass and randomizes physics/sensor parameters
+    on each reset for sim-to-real transfer.
+
+    Randomized parameters:
+      - keyboard_offset: XY position shift (+-2cm)
+      - keyboard_height: surface height (+-1cm)
+      - observation_noise: additive Gaussian scaled by a random factor
+      - action_scale: multiplicative scaling of actions (motor gain variation)
+      - gravity: +-5% Z-axis variation
+      - key_friction: surface friction coefficient randomization
+      - control_latency: 0-2 step action delay
+
+    Usage:
+        base_env = CoarseReachEnv(render=False)
+        env = DomainRandWrapper(base_env)
+        obs = env.reset()        # randomizes params then resets
+        obs, r, done, info = env.step(action)
+    """
+
+    KB_OFFSET_RANGE    = 0.02          # m, +-2cm keyboard XY shift
+    KB_HEIGHT_RANGE    = 0.01          # m, +-1cm keyboard Z shift
+    OBS_NOISE_RANGE    = (0.5, 2.0)    # multiplier on base noise std
+    ACTION_SCALE_RANGE = (0.85, 1.15)  # motor gain variation
+    GRAVITY_RANGE      = (9.61, 10.01) # m/s^2, ~+-2.5% of 9.81
+    FRICTION_RANGE     = (0.3, 1.5)    # friction coefficient scale
+    LATENCY_STEPS      = (0, 3)        # action delay in sim steps
+
+    def __init__(self, env: KeyboardEnv):
+        self.env = env
+        self._action_buffer = []
+        self._latency = 0
+        self._action_scale = 1.0
+        self._obs_noise_scale = 1.0
+
+    def __getattr__(self, name):
+        return getattr(self.env, name)
+
+    def reset(self, **kwargs):
+        kx_base, ky_base = -0.15, 0.0
+        self.env.keyboard_offset = np.array([
+            kx_base + np.random.uniform(-self.KB_OFFSET_RANGE, self.KB_OFFSET_RANGE),
+            ky_base + np.random.uniform(-self.KB_OFFSET_RANGE, self.KB_OFFSET_RANGE),
+        ])
+        self.env.keyboard_height = 0.15 + np.random.uniform(
+            -self.KB_HEIGHT_RANGE, self.KB_HEIGHT_RANGE
+        )
+
+        self._action_scale = np.random.uniform(*self.ACTION_SCALE_RANGE)
+        self._obs_noise_scale = np.random.uniform(*self.OBS_NOISE_RANGE)
+        self._latency = np.random.randint(self.LATENCY_STEPS[0], self.LATENCY_STEPS[1])
+        self._action_buffer = []
+
+        result = self.env.reset(**kwargs)
+
+        # Randomize gravity post-reset
+        g = np.random.uniform(*self.GRAVITY_RANGE)
+        self.env.sim.model.opt.gravity[2] = -g
+
+        # Randomize key friction
+        friction_scale = np.random.uniform(*self.FRICTION_RANGE)
+        for i in range(self.env.sim.model.ngeom):
+            name = self.env.sim.model.geom_id2name(i)
+            if name and name.startswith("key_"):
+                self.env.sim.model.geom_friction[i, 0] *= friction_scale
+
+        return result
+
+    def step(self, action):
+        scaled_action = np.array(action) * self._action_scale
+
+        self._action_buffer.append(scaled_action)
+        if len(self._action_buffer) > self._latency:
+            delayed_action = self._action_buffer.pop(0)
+        else:
+            delayed_action = np.zeros_like(scaled_action)
+
+        obs, reward, done, info = self.env.step(delayed_action)
+        info['dr_action_scale'] = self._action_scale
+        info['dr_obs_noise'] = self._obs_noise_scale
+        info['dr_latency'] = self._latency
+        return obs, reward, done, info
+
+    def _flat_obs(self):
+        obs = self.env._flat_obs()
+        noise = np.random.normal(0, 0.001 * self._obs_noise_scale, size=obs.shape)
+        return (obs + noise).astype(np.float32)
+
+    def render(self, *args, **kwargs):
+        return self.env.render(*args, **kwargs)
+
+    def close(self):
+        return self.env.close()
