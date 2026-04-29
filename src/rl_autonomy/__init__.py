@@ -1,10 +1,14 @@
-from .assets.arms.really_simple_robot import ReallySimpleArm
-from .assets.arms.simple_arm import SimpleArm
-from .rl_agent import RobosuiteGymWrapper
-from .networks import MLP, GaussianActor, DoubleCritic, SkillSelectorV3, SkillConditionedActorV3
-from .memory import GPUReplayBuffer
-from .agent import HierarchicalSACAgentV3
-from .config import Config
-from .testing.env_wrapper import RoboSuiteEnvV3, SubprocVecEnvV3
-from .trainer import train_v3, evaluate_v3
-from .testing.main import main
+"""rl_autonomy — RL pipeline for keyboard typing on the Rover2026 arm.
+
+After Phase 1 of the rewrite this package will export:
+    - envs.KeyboardEnv         (sim env)
+    - algos.RLPDSAC            (training algorithm)
+    - configs.controller_jp    (action-space controller config)
+    - tools.*                  (one-off scripts: env diagnostics, demo recorder, ...)
+
+Right now (Phase 0) the package only exposes the legacy keyboard_env
+under its old top-level path so existing scripts that still import
+`from keyboard_env import ...` keep working until Phase 1 rewrites the env.
+"""
+
+__version__ = "0.1.0.dev0"

@@ -438,8 +438,8 @@ Per-episode unless noted. The complete spec:
 | Joint friction | ×[0.5, 1.5] | no |
 | Joint damping | ×[0.5, 2.0] | no |
 | Link mass | ×[0.9, 1.1] | no |
-| OSC Kp gain | ×[0.7, 1.3] | no |
-| OSC Kd gain | ×[0.7, 1.3] | no |
+| JOINT_POSITION Kp | ×[0.7, 1.3] | no |
+| JOINT_POSITION damping_ratio | ×[0.7, 1.3] | no |
 | Action latency (1st-order lag τ) | [0, 100 ms] | per-step jitter ±20% |
 | Joint encoder noise | σ = 0.001 rad | per-step |
 | Joint velocity noise | σ = 0.01 rad/s | per-step |
@@ -484,11 +484,24 @@ If sim-to-real transfer success is < 70% on the first hardware test, we don't re
 
 Phases are listed in dependency order. **Each phase must produce a verifiable artifact before the next phase starts.**
 
-### Phase 0 — Hygiene (1 day)
-- Pin `gymnasium` only (drop `gym==0.23.0`). Pin `stable-baselines3==2.5.0`, `sb3-contrib==2.5.0`, `dm_control>=1.0.20`, `mujoco>=3.3.0`. Bump `requirements.txt`.
-- Delete `rl_agent/`, `rl_agent_pranav/`, `skills/{press,reach,traverse,retract}/{train_coarse,train_fine,train_domain_rand}.py`, `skills/hrl/`, `testing/{train_lift_v2,train_lift_v3,bc_to_rl,bc_train,bc_trainer,phase1_verify,phase2_debug,RLAgent,memory,trainer,agent,networks,test,main,simulations}.py`. Move `keyboard_demo.py`, `demo_recorder.py`, `cartesian_keyboard.py`, `env_diagnostics.py`, `mujoco_joint_states.py` into `tools/` (kept).
-- Single Python module path: `from rl_autonomy.* import *`. Drop the `sys.path.insert` shim from every script.
-- **Artifact**: `pip install -e .` works; `pytest tests/smoke.py` passes (`tests/smoke.py` just imports the package and runs a single env step).
+### Phase 0 — Hygiene (DONE)
+> Status: completed 2026-04-29. See git log on branch `aaron/rl_rewrite` for the diff.
+>
+> What got done:
+> - **GPU compat verified**: rover_gpu container ships `torch 2.10.0+cu128` with `sm_120` in `arch_list` — Blackwell on RTX 5060 works out of the box. No nightly install needed. Driver 590.48.01 / CUDA 13.1.
+> - **Action-space spike**: 6 spike scripts (`spike_*.py`) demonstrated OSC_POSE fails on Rover2026 across 4 tuning variants; JOINT_POSITION + Jacobian-pseudoinverse converges to 0.2 mm XY / 0.4 mm Z. See §19. Decision committed: JOINT_POSITION for v1.
+> - **Deletions** (with user approval, 2026-04-29):
+>   - `src/rl_autonomy/rl_agent/`, `rl_agent_pranav/`, `rl_agent_base/` — entire dirs.
+>   - `src/rl_autonomy/skills/{press,reach,traverse,retract,hrl}/` and `skills/train_utils.py`, `skills/__init__.py` — entire `skills/` tree.
+>   - `src/rl_autonomy/testing/` — minus the 5 files that moved to `tools/`.
+> - **Moves**:
+>   - `testing/{demo_recorder, keyboard_demo, cartesian_keyboard, env_diagnostics, mujoco_joint_states}.py` → `tools/`.
+>   - `detect_keys_yolo.py` → `tools/detect_keys_yolo.py`.
+> - **Pinned deps** in new `pyproject.toml` (at repo root — see §13 note) and updated `src/rl_autonomy/requirements.txt`. Versions: `mujoco>=3.6.0`, `stable-baselines3>=2.7,<3`, `sb3-contrib>=2.7,<3`, `gymnasium>=1.0,<2`, `dm-control>=1.0.20`, `numpy>=1.24,<3`. (Original TRACKER said sb3==2.5.0 / mujoco>=3.3.0 — bumped to match the container baseline that's already proven to work with sm_120.)
+> - **Package**: `rl_autonomy` is now `pip install -e .`-able from repo root. `setup.py` shim added for older pip clients.
+> - **Configs**: `src/rl_autonomy/configs/controller_jp.json` shipped (the JOINT_POSITION config from §6.1). Also `configs/__init__.py` exposes `CONTROLLER_JP_PATH`.
+> - **Smoke test**: `import rl_autonomy`, `from rl_autonomy.configs import CONTROLLER_JP_PATH`, and instantiating `KeyboardEnv` (legacy file, will be rewritten in Phase 1) with the JOINT_POSITION controller all pass; 5 zero-action steps run cleanly.
+> - **Spike scripts**: removed at end of Phase 0 — their finding is preserved in §19 and `configs/controller_jp.json`.
 
 ### Phase 1 — Env rewrite (3 days)
 - New `rl_autonomy/envs/keyboard_env.py` (replaces current). Single class: `KeyboardEnv`. No skill subclasses. Skill differences are encoded as a `mode: Literal["approach","strike"]` constructor arg that selects: action mask, success criterion, episode horizon, reward function.
@@ -534,65 +547,79 @@ Total: ~13 working days.
 
 ## 13. Target file tree
 
+> **Layout note**: `pyproject.toml` lives at the **repo root**, not at `src/rl_autonomy/pyproject.toml` as originally written. Standard PEP 518 src-layout: package code under `src/rl_autonomy/`, build metadata at the project root. `pip install -e .` from repo root makes `import rl_autonomy` work. A `setup.py` shim at repo root supports older pip versions that lack PEP 660.
+
 ```
-src/rl_autonomy/
-├── __init__.py
-├── pyproject.toml                       # NEW: package metadata + deps (replace requirements.txt)
-├── configs/
-│   ├── rlpd_sac.yaml                    # algorithm hparams
-│   ├── env_keyboard.yaml                # env hparams (control_freq, horizon, DR ranges)
-│   └── curriculum.yaml                  # phase boundaries
-├── envs/
-│   ├── __init__.py
-│   ├── keyboard_env.py                  # NEW: single class, mode-switched
-│   ├── action_adapter.py                # OSC_POSE + solenoid wrapping
-│   ├── obs_adapter.py                   # actor/critic obs builders, EEF-frame conversion
-│   ├── domain_rand.py                   # proper gym.Wrapper, full DR axes
-│   └── normalizer.py                    # RunningMeanStd
-├── algos/
-│   ├── __init__.py
-│   ├── rlpd_sac.py                      # SAC + LayerNorm + symmetric replay + UTD=10
-│   ├── bc_pretrain.py                   # BC trainer
-│   ├── residual_actor.py                # frozen base + learnable residual head
-│   └── networks.py                      # MLP, GELU, LayerNorm critics
-├── curricula/
-│   ├── state_replay_curriculum.py
-│   └── key_phase_curriculum.py
-├── data/
-│   ├── demo_buffer.py
-│   └── replay_buffer.py                 # symmetric-sampling buffer
-├── scripts/
-│   ├── train_approach.py
-│   ├── train_strike.py
-│   ├── eval_orchestrator.py
-│   └── render_rollout.py
-├── bridge/
-│   ├── synthetic_moteus_node.py
-│   └── policy_node.py
-├── tools/
-│   ├── env_diagnostics.py               # ex testing/env_diagnostics.py, kept
-│   ├── demo_recorder.py                 # ex testing/, kept
-│   ├── cartesian_keyboard.py            # ex testing/, kept
-│   ├── keyboard_demo.py                 # ex testing/, kept
-│   └── mujoco_joint_states.py           # ex testing/, kept
-├── documentation/
-│   └── keyboard_typing_pipeline.md      # updated to reflect this rewrite
-├── tests/
-│   ├── smoke.py
+LearnFlake/                              # repo root
+├── pyproject.toml                       # NEW (Phase 0): package metadata + runtime deps
+├── setup.py                             # NEW (Phase 0): legacy pip compat shim
+├── TRACKER.md                           # this file
+├── src/
+│   └── rl_autonomy/
+│       ├── __init__.py                  # exports __version__
+│       ├── requirements.txt             # snapshot of pyproject.toml deps for `pip install -r`
+│       ├── keyboard_env.py              # legacy file, rewritten in Phase 1 → envs/keyboard_env.py
+│       ├── configs/
+│       │   ├── __init__.py              # NEW (Phase 0): exposes CONTROLLER_JP_PATH
+│       │   ├── controller_jp.json       # NEW (Phase 0): JOINT_POSITION controller — see §6.1, §19
+│       │   ├── rlpd_sac.yaml            # Phase 2: algorithm hparams
+│       │   ├── env_keyboard.yaml        # Phase 1: env hparams (control_freq, horizon, DR ranges)
+│       │   └── curriculum.yaml          # Phase 3: phase boundaries
+│       ├── envs/                        # Phase 1
+│       │   ├── __init__.py
+│       │   ├── keyboard_env.py          # single class, mode-switched
+│       │   ├── action_adapter.py        # JOINT_POSITION + solenoid wrapping
+│       │   ├── obs_adapter.py           # actor/critic obs builders, EEF-frame conversion
+│       │   ├── domain_rand.py           # proper gym.Wrapper, full DR axes
+│       │   └── normalizer.py            # RunningMeanStd
+│       ├── algos/                       # Phase 2
+│       │   ├── __init__.py
+│       │   ├── rlpd_sac.py              # SAC + LayerNorm + symmetric replay + UTD=10
+│       │   ├── bc_pretrain.py           # BC trainer (gated; demos skipped for v1 per user)
+│       │   ├── residual_actor.py        # frozen base + learnable residual head (gated)
+│       │   └── networks.py              # MLP, GELU, LayerNorm critics
+│       ├── curricula/                   # Phase 3
+│       │   ├── state_replay_curriculum.py
+│       │   └── key_phase_curriculum.py
+│       ├── data/                        # Phase 2
+│       │   ├── demo_buffer.py
+│       │   └── replay_buffer.py         # symmetric-sampling buffer
+│       ├── scripts/                     # Phase 3+
+│       │   ├── train_approach.py
+│       │   ├── train_strike.py
+│       │   ├── eval_orchestrator.py
+│       │   └── render_rollout.py
+│       ├── tools/                       # ALREADY in place (Phase 0)
+│       │   ├── __init__.py
+│       │   ├── env_diagnostics.py       # ex testing/env_diagnostics.py
+│       │   ├── demo_recorder.py         # ex testing/
+│       │   ├── cartesian_keyboard.py    # ex testing/
+│       │   ├── keyboard_demo.py         # ex testing/
+│       │   ├── mujoco_joint_states.py   # ex testing/
+│       │   └── detect_keys_yolo.py      # ex top-level
+│       ├── documentation/               # KEPT (Phase 0)
+│       │   ├── keyboard_typing_pipeline.md   # design doc; updated to reflect this rewrite
+│       │   ├── inputs.md
+│       │   ├── schema.md
+│       │   └── thoughts.md
+│       ├── checkpoints/                 # gitignored
+│       └── logs/                        # gitignored
+├── tests/                               # Phase 1+ (top-level)
+│   ├── test_smoke.py
 │   ├── test_env_observation_shapes.py
 │   ├── test_action_adapter.py
 │   └── test_reward_bounds.py
-├── demos/                               # checked in only if small (HDF5 ~100 MB)
-│   └── approach_v1.h5
-├── checkpoints/                         # gitignored
-└── logs/                                # gitignored
+└── (existing ROS2 / colcon files unchanged)
 ```
 
-What's gone (under Phase 0):
-- `rl_agent/`, `rl_agent_pranav/` — entirely.
-- `skills/` — replaced by `scripts/` + `envs/`.
+The Phase 5 bridge code (`synthetic_moteus_node.py`, `policy_node.py`) is descoped from v1 per user (sim-only, hardware not yet built).
+
+What's gone (already deleted in Phase 0):
+- `rl_agent/`, `rl_agent_pranav/`, `rl_agent_base/` — entirely.
+- `skills/` — entire tree, will be replaced by `scripts/` + `envs/` in Phase 1.
 - `testing/` — useful pieces moved to `tools/`, the rest deleted.
-- `rl_agent_base/rklb/rlkb_framework/` — superseded by the new structure (it was a half-built skeleton anyway: `BaseAgent`, `Runner`, `MockKeyboardEnv`).
+
+Existing demo HDF5s and BC checkpoints from `testing/demos/` and `testing/models/` are recoverable via `git checkout aaron/more_rl -- src/rl_autonomy/testing/{demos,models}/` if ever needed. v1 skips BC pretraining so they're not on the critical path.
 
 ---
 

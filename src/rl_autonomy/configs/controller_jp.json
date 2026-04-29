@@ -1,0 +1,28 @@
+{
+  "_comment": "JOINT_POSITION composite controller for Rover2026. Selected in Phase 0 spike (TRACKER §6, §19) after OSC_POSE failed convergence on this 6-DOF arm. Per-joint delta input in [-1,1] mapped to ±0.05 rad/step at 20 Hz. Over-damped P-D tracker (kp=100, damping_ratio=1.5) suppresses overshoot; matches Moteus position-mode interface for sim-to-real fidelity.",
+  "type": "BASIC",
+  "body_parts": {
+    "arms": {
+      "right": {
+        "type": "JOINT_POSITION",
+        "input_max": 1.0,
+        "input_min": -1.0,
+        "output_max": 0.05,
+        "output_min": -0.05,
+        "kp": 100,
+        "damping_ratio": 1.5,
+        "impedance_mode": "fixed",
+        "kp_limits": [0, 300],
+        "damping_ratio_limits": [0, 10],
+        "qpos_limits": null,
+        "interpolation": null,
+        "ramp_ratio": 0.2,
+        "gripper": {
+          "type": "GRIP",
+          "input_max": 1,
+          "input_min": -1
+        }
+      }
+    }
+  }
+}

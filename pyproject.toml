@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rl_autonomy"
+version = "0.1.0.dev0"
+description = "RL pipeline for keyboard typing on the Rover2026 arm (LearnFlake)."
+readme = "TRACKER.md"
+requires-python = ">=3.10"
+authors = [
+    {name = "Aaron Rhim", email = "rhimaaron@gmail.com"},
+]
+
+# Runtime deps. Versions reflect the rover_gpu container baseline (torch
+# 2.10.0+cu128 for sm_120 Blackwell, robosuite 1.5.1, mujoco 3.6.0). DO NOT
+# downgrade these without checking RTX 5060 (sm_120) compatibility — see
+# TRACKER §0.4 for the Blackwell story.
+dependencies = [
+    "numpy>=1.24,<3",
+    "scipy>=1.11",
+    "mujoco>=3.6.0",
+    "gymnasium>=1.0,<2",
+    "stable-baselines3>=2.7,<3",
+    "sb3-contrib>=2.7,<3",     # CrossQ / TQC fall-backs
+    "dm-control>=1.0.20",       # for rewards.tolerance shaping primitive
+    "h5py>=3.10",
+    "tqdm>=4.66",
+    "tensorboard>=2.15",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.4",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["rl_autonomy*"]
+exclude = ["external_pkgs*"]
+
+[tool.setuptools.package-data]
+"rl_autonomy.configs" = ["*.json", "*.yaml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
