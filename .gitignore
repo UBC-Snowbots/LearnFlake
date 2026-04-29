@@ -83,3 +83,5 @@ CLAUDE.md
 
 # cache
 src/rl_autonomy/__pycache__
+# Claude Code worktrees
+.worktrees/
