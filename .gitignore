@@ -72,7 +72,7 @@ rl/
 # Ignore these (will later push only best model and necessary files)
 src/rl_autonomy/testing/
 src/rl_autonomy/checkpoints/
-src/rl_autonomy/documentation/
+# documentation/ kept tracked in v1 rewrite — stores design doc + research notes
 
 .venv
 src/MUJOCO_LOG.TXT
