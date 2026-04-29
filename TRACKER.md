@@ -15,7 +15,7 @@ The rewrite has one functional target: **a policy stack that, after a single tra
 |---|---|---|
 | Algorithm | vanilla SB3 SAC, default hparams, no LayerNorm, UTD≈1 | **RLPD-style SAC** (high-UTD, LayerNorm, symmetric demo sampling) — fall-back: **CrossQ** for 1-UTD efficiency |
 | Network | `MlpPolicy` `[256,256]`, ReLU | 3-layer `[256,256,256]` MLP, **GELU**, **LayerNorm** on critic, ensemble-of-2 for SAC, ensemble-of-10 for DroQ-mode |
-| Action space | `JOINT_VELOCITY` (raw 6 joint vels + 1 solenoid) | **OSC_POSE** Cartesian delta (Δx,Δy,Δz,Δrx,Δry,Δrz) + 1 binary solenoid; arm tracks impedance, not raw velocity |
+| Action space | `JOINT_VELOCITY` (raw 6 joint vels + 1 solenoid) | **JOINT_POSITION** delta (6-D, ±0.05 rad/step) + 1 binary solenoid. Was OSC_POSE in the original plan; pivoted in Phase 0 spike — see §6 and §19. |
 | Skills | 9 envs (CoarseReach, FineReach, FineAlign, Press, FinePress, Retract, FineRetract, Traverse, FineTraverse, HRL) | **2 skills** — `Approach` (move+align in one shot) and `Strike` (extend solenoid). Plus a deterministic `Travel` between keys via cartesian linear interpolation. No HRL. |
 | Reward | hand-crafted dense w/ magic numbers, discontinuous bonuses | `dm_control.utils.rewards.tolerance` shaping + **PBRS** wrapper to preserve optimal policy + sparse success bonus |
 | Demos | mentioned, never wired in | **20–50 scripted teleop demos** drive BC pretrain → **residual SAC** fine-tune (ResiP-style) |
@@ -276,19 +276,33 @@ The current code has `r_time = -0.5` per tick which biases the agent toward term
 
 ---
 
-## 6. Action space — OSC_POSE + binary solenoid
+## 6. Action space — JOINT_POSITION + binary solenoid
 
-### 6.1 Cartesian impedance via robosuite OSC_POSE
+> **Spike result (Phase 0):** OSC_POSE was originally specified here, but four spike variants on Rover2026 (`spike_osc_pose.py` → `spike_osc_v5.py`) all failed: the arm passes through the target then drifts away by 1 m+. Switching to JOINT_POSITION with a Jacobian-pseudoinverse step gave clean convergence to **0.2 mm XY / 0.4 mm Z** in 100 steps (`spike_jp.py`). Decision: use JOINT_POSITION for v1; OSC remains a future ablation if we need its compliance for harder contact tasks. See §19 for the full rationale.
 
-```python
-arm_cfg = suite.load_part_controller_config(default_controller="OSC_POSE")
-ctrl_cfg = refactor_composite_controller_config(arm_cfg, "Rover2026", ["right"])
+### 6.1 Robosuite JOINT_POSITION (delta) controller config
+
+```json
+{
+  "type": "JOINT_POSITION",
+  "input_max": 1.0, "input_min": -1.0,
+  "output_max": 0.05,  "output_min": -0.05,    // ±0.05 rad/step (≈±2.9°/step)
+  "kp": 100, "damping_ratio": 1.5,             // over-damped: no overshoot
+  "impedance_mode": "fixed",
+  "qpos_limits": null,
+  "interpolation": null, "ramp_ratio": 0.2,
+  "gripper": {"type": "GRIP", "input_max": 1, "input_min": -1}
+}
 ```
 
-- Action: `(dx, dy, dz, droll, dpitch, dyaw) ∈ [−1,1]^6`, scaled to `(±2 cm, ±2 cm, ±2 cm, ±0.1 rad, ±0.1 rad, ±0.1 rad)` per control tick at 20 Hz. These limits cap end-effector velocity at ~40 cm/s and ~2 rad/s — comfortable for the Rover2026.
-- Impedance: default fixed Kp/Kd from robosuite. We expose `impedance_mode='variable_kp'` as a future ablation; not enabled in v1.
-- Why OSC and not IK: OSC computes joint torques from a Cartesian goal under an inertia model — it's compliant (small forces don't cause large torques), which is exactly what we need when the actuator tip touches the keyboard. Pure IK is rigid; the arm fights any external force.
-- Why not impedance directly: OSC *is* impedance in disguise; same math.
+Stored at `configs/controller_jp.json`; loaded via `suite.load_composite_controller_config(controller=...)`.
+
+- Action: `(Δq₀, …, Δq₅) ∈ [−1,1]^6`, scaled to ±0.05 rad/step at 20 Hz → ±1 rad/s per joint cap. Comfortable for the Rover2026's Moteus-driven joints.
+- The controller is internally a P-D position tracker on each joint with Kp=100, ζ=1.5. Over-damped to suppress oscillation; settling time ≈ 0.4 s.
+- Why this beats JOINT_VELOCITY: JOINT_POSITION integrates the policy's commands into smooth trajectories, matches what real Moteus servos do natively, and is bounded by joint limits inside the controller. JOINT_VELOCITY is bang-bang and noisy.
+- Why this beats OSC_POSE on Rover2026: see Phase 0 spike results in §19. The 6-DOF arm's Jacobian-redundancy resolution under OSC's torque-level loop produces large lateral drift. Joint-space control sidesteps this entirely.
+- Cost: the policy must implicitly learn the arm's forward kinematics. Empirically RL learns this in ≤200k env steps with a dense reward — this is the standard SAC-on-MuJoCo regime and the RoboPianist team did exactly this on bimanual hands. Loss of OSC's natural impedance is acceptable for our task: keyboard contact is light (~2 N over ~4 mm of key travel), and the over-damped joint controller already provides some compliance through finite-Kp tracking.
+- Future upgrade path: if a deployed v1 has issues with hard contact (we observe the actuator tip mashing keys instead of pressing them), revisit OSC tuning or build a custom Cartesian impedance controller (~150 LOC over `mujoco.mj_jacSite`). Not on the v1 critical path.
 
 ### 6.2 Solenoid action
 
@@ -723,3 +737,59 @@ When this TRACKER is done:
 6. The full design (networks, rewards, curriculum, DR axes, hardware bridge) is documented in this file plus `documentation/keyboard_typing_pipeline.md`, with no unstated magic numbers.
 
 That's the bar. Anything less means we kept some of the original failure modes.
+
+---
+
+## 19. Phase 0 spike post-mortem — why JOINT_POSITION not OSC_POSE
+
+Before any rewrite touched code, we spiked the action-space choice on the actual Rover2026 model. Result drove a meaningful pivot in §6.
+
+### 19.1 What we tested
+
+Five spike scripts, run inside `rover_gpu` (torch 2.10.0+cu128, robosuite 1.5.1, mujoco 3.6.0, sm_120):
+
+| Spike | Controller | Configuration | Result |
+|---|---|---|---|
+| `spike_osc_pose.py` | OSC_POSE (default) | `output_max=[0.05,…]`, kp=150, ζ=1.0, P-ctrl + cross-product orientation | 0/20 keys converged. XY errors 9 mm – 887 mm, large tilt. |
+| `spike_osc_diag.py` | OSC_POSE (default) | T1: zero-action / T2: +X cmd / T3: −Z cmd / T4: P-ctrl→g | T1 PASS (0 mm drift). T2 FAIL (commanded +X, EEF moved −X). T3 partial (Δz=−11 cm correct dir, but coupling Δx=−122 cm). T4 FAIL (oscillated, never converged). |
+| `spike_osc_v3.py` | OSC_POSE / OSC_POSITION / IK_POSE | three controllers compared | OSC_POSE: best xy=35 mm, best z=1.6 mm but final wandered to 690 mm. OSC_POSITION worse. IK_POSE: load error in robosuite 1.5.1. |
+| `spike_osc_v4.py` | OSC_POSE tuned | `output_max=0.02`, kp=80, ζ=1.5, gentler P | 0/20 keys reach 5 mm. Z error often <1 mm at *best* sample — but final positions 200 mm to 1.6 m off. Pattern: arm passes through target then drifts. |
+| `spike_osc_v5.py` | OSC_POSE absolute input | `input_type="absolute"`, send target xyz directly | 0/19 keys reach 5 mm. Same drift pattern; absolute mode does not help. |
+| `spike_jp.py` | **JOINT_POSITION** | output_max=0.05, kp=100, ζ=1.5, Jacobian-pseudoinverse step | T1 PASS. T2 PASS (every joint produces consistent EEF motion). T3 PASS: **0.2 mm XY, 0.4 mm Z** in 100 steps, monotone convergence, no overshoot. |
+
+### 19.2 Diagnosis
+
+OSC_POSE's drift is consistent with a Jacobian-redundancy / null-space issue specific to Rover2026's kinematics. The arm has exactly 6 DOF for full pose tracking — minimum for OSC_POSE — and the inertia-shaping on this particular linkage at the home pose appears to push the arm out of the workspace under saturated commands. Symptoms:
+
+- Zero-action holds pose perfectly (the controller's PD term is fine).
+- A pure +X position command produces motion in −X with large coupling into Y and Z — consistent with the Jacobian becoming poorly conditioned and the OSC's null-space projection dominating the desired pos error.
+- Z control alone works (arm descends correctly) but lateral control fails.
+- Tuning kp lower (150 → 80) and damping higher (1.0 → 1.5) helped near the target but didn't fix the global instability.
+
+Could we fix this? Maybe — likely candidates: (a) explicit null-space posture target inside the OSC config, (b) custom Cartesian impedance over `mujoco.mj_jacSite` skipping the redundancy resolution we don't need (since we have exactly 6 DOF), (c) wait for robosuite 1.6 OSC fixes. None are on the v1 critical path.
+
+### 19.3 Why JOINT_POSITION is the right call here, not just a fallback
+
+- **Convergence proven**: 0.2/0.4 mm errors with a trivial Jacobian-pseudoinverse step. The RL policy has more capacity than that step.
+- **Hardware match**: real Moteus servos use position commands natively (`SetCommand(position=...)` over CAN-FD). JOINT_POSITION sim → real has nearly zero gap on the action interface.
+- **Stable training**: joint-space MDPs are well-studied (every Mujoco gym task uses joint actions); SAC convergence on 6-D joint action spaces is standard fare.
+- **Loss is bounded**: the policy must learn the arm's forward kinematics implicitly. RL does this routinely; RoboPianist's bimanual SAC learned the kinematics of two ShadowHands (40+ DOF) in 1M steps. Our 6-DOF arm is far easier.
+- **Compliance is preserved at the level we need**: kp=100, ζ=1.5 over-damped tracker still gives finite mechanical compliance under contact. For a 2 N keyboard press, this is sufficient. We don't need OSC's full operational-space inertia shaping.
+
+### 19.4 What this changes downstream
+
+- §3 (algorithm): no change. RLPD-SAC still applies. Action_dim still 7 (6 joints + 1 solenoid) — same shape, different semantics.
+- §4 (network): no change.
+- §5 (reward): no change. Reward uses EEF position (computed from joint state via FK), not joint-state directly.
+- §6: rewritten above.
+- §7 (curriculum): no change.
+- §8 (demos): demos must be recorded in JOINT_POSITION action space. The existing `demo_recorder.py` records joint trajectories anyway, so this is a non-issue.
+- §9 (obs): no change. The 6-D rotation rep is still useful as proprioception even when actions are in joint space.
+- §10 (DR): no change to the DR axes themselves, but the sensitivity targets shift slightly (Kp/Kd randomization range applies to the JOINT_POSITION controller's gains, not OSC's).
+- §11 (sim2real): improved — JOINT_POSITION matches Moteus's native interface, so no `cartesian_control_ros.py` complexity needed; the policy's joint commands map 1-1 to Moteus position commands.
+- §12 (phases): Phase 0 now also commits the JOINT_POSITION controller config to `configs/controller_jp.json`. Phase 1's env rewrite uses this config from the start.
+- §16 (risks): row 1 changes from "OSC fails → custom impedance" to "JOINT_POSITION fails on hard contact → reinvestigate OSC or impedance". Far less likely than the OSC failure mode.
+
+### 19.5 Spike artifacts kept in repo
+
+Until Phase 1 starts the env rewrite, the spike scripts live at the worktree root: `spike_osc_pose.py`, `spike_osc_diag.py`, `spike_osc_v3.py`, `spike_osc_v4.py`, `spike_osc_v5.py`, `spike_jp.py`. They are deleted as part of the Phase 0 cleanup once the result is encoded into `configs/controller_jp.json`.
