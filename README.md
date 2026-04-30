@@ -1,5 +1,76 @@
 # LearnFlake
-RL bitch
+
+Reinforcement-learning pipeline for the Rover2026 6-DOF arm + solenoid actuator
+typing on a Redragon K552 TKL keyboard in MuJoCo (RoboSuite).
+
+> **v1 rewrite is on branch `aaron/rl_rewrite`.** Design contract:
+> [TRACKER.md](TRACKER.md). Background research:
+> [`src/rl_autonomy/documentation/rl_research_notes.md`](src/rl_autonomy/documentation/rl_research_notes.md).
+
+## v1 quickstart
+
+All commands run inside the `rover_gpu` docker container (see Docker section
+below for setup):
+
+```bash
+# from inside rover_gpu, at /LearnFlake/.worktrees/rl_rewrite/
+pip install -e . --no-build-isolation     # one-time
+pytest tests/                              # 34 tests
+```
+
+### Visualize the env
+
+```bash
+# Live MuJoCo viewer
+python3 -m rl_autonomy.tools.visualize --policy p_ctrl --key g
+
+# Headless PNG sequence
+python3 -m rl_autonomy.tools.visualize --save-frames ./viz \
+    --policy p_ctrl --key f12 --steps 400 --frame-every 30
+```
+
+### Train Approach (1M steps, ~overnight on RTX 5060)
+
+```bash
+python3 -m rl_autonomy.scripts.train_approach \
+    --steps 1000000 --domain-rand \
+    --save-dir checkpoints/approach_v1 \
+    --log-dir logs/approach_v1
+tensorboard --logdir logs/approach_v1
+```
+
+### Train Strike (100k steps, ~30 min)
+
+```bash
+python3 -m rl_autonomy.scripts.train_strike \
+    --steps 100000 \
+    --save-dir checkpoints/strike_v1 \
+    --log-dir logs/strike_v1
+```
+
+### Evaluate the full pipeline (M4 acceptance)
+
+```bash
+python3 -m rl_autonomy.scripts.eval_orchestrator \
+    --approach checkpoints/approach_v1/approach_final.pt \
+    --strike   checkpoints/strike_v1/strike_final.pt \
+    --keys all --trials-per-key 5 \
+    --out-md results/m4_success_matrix.md
+```
+
+Pass criterion: ≥80/87 keys at ≥80% full-chain success.
+
+### Acceptance gates (TRACKER §15)
+
+| Gate | Status | What it checks |
+|---|---|---|
+| **M1** env correctness | ✅ PASSED | `python -m rl_autonomy.tools.m1_p_controller` |
+| **M2** algorithm correctness | ✅ PASSED | `python -m rl_autonomy.tools.m2_pendulum` |
+| **M3** Approach training | ⏳ pending full training run |
+| **M4** full pipeline 87-key matrix | ⏳ pending M3 + Strike training |
+| **M5** hardware | descoped (no real arm yet) |
+
+---
 
 Visit [Docker.md](Docker.md) for the most recent up-to-date installation guide if you plan on using Docker to manage your environment.
 

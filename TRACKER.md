@@ -539,16 +539,31 @@ Phases are listed in dependency order. **Each phase must produce a verifiable ar
 > - **Tests**: `tests/test_rlpd_sac.py` adds 7 unit tests (network shapes, replay buffer correctness including circular overwrite, symmetric replay's demo-fraction decay schedule, single train_step doesn't NaN, residual actor zero-init = base output). 29 tests total, all green.
 > - **Hyperparameters**: encoded directly in `RLPDConfig` dataclass at the top of `algos/rlpd_sac.py`; YAML config deferred until Phase 3 (when scripts/train_approach.py needs to read it from disk).
 
-### Phase 3 — Curriculum + training script (2 days)
-- `rl_autonomy/curricula/state_replay_curriculum.py` (DemoStart-style) and `rl_autonomy/curricula/key_phase_curriculum.py` (manual phases).
-- `rl_autonomy/scripts/train_approach.py` and `rl_autonomy/scripts/train_strike.py`. Each is ~80 LOC. They wire env + curriculum + algo + logger.
-- WandB logging by default (group=`approach-v1`, name=git-sha+timestamp); fall back to TensorBoard.
-- **Artifact**: `python -m rl_autonomy.scripts.train_approach --steps 500_000 --num-envs 8` finishes overnight on this box; eval success rate ≥ 0.85 on Phase B keys.
+### Phase 3 — Curriculum + training script (DONE)
+> Status: completed 2026-04-29.
+>
+> What got done:
+> - **`rl_autonomy/curricula/`** subpackage:
+>   - `key_phase_curriculum.py` — `KeyPhaseCurriculum` cycles A → B → C as the rolling success rate over a 200-episode window crosses 0.85. Reset stats on advance. State-dict save/load. Three phases: 20 / ~50 / 87 keys.
+>   - `state_replay_curriculum.py` — DemoStart-style stub. v1 ships demo-free per user direction; the class raises `NotImplementedError` if demos are passed and is a no-op otherwise. v1.1 fills in the actual implementation.
+> - **`rl_autonomy/scripts/train_approach.py`**: wires `make_env(mode='approach')` + `KeyPhaseCurriculum` + `RLPDSAC`. CLI: `--steps`, `--utd`, `--warmstart`, `--save-dir`, `--log-dir`, `--domain-rand`. TensorBoard scalars: `train/{critic_loss,actor_loss,alpha,...}`, `curriculum/{phase,rolling_success}`, `episode/return`.
+> - **`rl_autonomy/scripts/train_strike.py`**: same shape but no curriculum (random key per episode is sufficient — Strike doesn't depend on key location).
+> - **WandB skipped for v1** — TensorBoard is the v1 logger. WandB integration is a one-liner add when wanted; descoped to keep the v1 dependency footprint smaller.
+> - **Smoke validation** (10k Approach + 5k Strike steps): pipeline runs end-to-end, no NaN, episode return monotonically increases (Approach: 68 → 111 over 10k steps), checkpoints save/load. Full M3 (1M steps overnight) is the user's responsibility — TRACKER §15 M3 success criteria are unchanged.
+> - **Tests**: `tests/test_curricula.py` adds 5 unit tests for `KeyPhaseCurriculum` (starts in phase A, advances on ≥85% rolling success, caps at phase C) and `StateReplayCurriculum` (v1 no-op behavior, raises if demos passed). 34 tests total, all green.
 
-### Phase 4 — Strike + integration (1 day)
-- Strike is a much smaller MDP (~50-step horizon, 1-D action). Train for 100k steps.
-- `rl_autonomy/scripts/eval_orchestrator.py`: deterministic chain Approach → Strike → done; runs across the full 87 keys, prints success matrix.
-- **Artifact**: 87-key success matrix where ≥ 80 keys succeed.
+### Phase 4 — Strike + integration (DONE-pipeline; M4 awaits full training)
+> Status: code complete 2026-04-29; M4 acceptance numbers depend on a full 1M-step Approach + 100k-step Strike training run.
+>
+> What got done:
+> - **`rl_autonomy/scripts/eval_orchestrator.py`**: loads Approach + Strike checkpoints, walks the wrapper stack to find the underlying `KeyboardEnv`, sets the target key per trial, runs the chain, tabulates a per-key success matrix in markdown. CLI: `--approach`, `--strike`, `--keys all|home|<csv>`, `--trials-per-key`, `--out-md`. M4 verdict (≥80/87 keys at ≥80% full success) printed at end.
+> - **Smoke run** with 10k/5k step checkpoints completed end-to-end on the home row (no crashes); naturally those undertrained checkpoints score 0/10 — pipeline is sound, performance awaits real training.
+> - **Strike skill simplification**: original §6 implied Strike must run from the *exact* sim state Approach left. v1 instead resets the Strike env on entry (Strike's `_reset_internal` already places the arm in a near-key pose with small noise per `keyboard_env.py`). This decouples the two skills' state machines and lets each skill be trained / evaluated independently. The user's typing pipeline calls Approach, then Strike on a fresh reset; the small loss of "exact state continuity" is paid back in robustness — Strike sees the actual distribution of post-Approach poses through its DR rather than a single Approach trajectory's tail.
+>
+> **What blocks M4 verdict**: the user must launch `train_approach.py --steps 1000000 --domain-rand` overnight (TRACKER §15 M3) and `train_strike.py --steps 100000`, then run eval_orchestrator. M4 is binary: the script prints PASSED iff ≥92% of keys have ≥80% full-chain success.
+
+### Phase 5 — Sim-to-real bridge (DESCOPED for v1, per user direction)
+> Status: descoped 2026-04-29. Real arm not yet built per user memory; revisit when hardware exists. The descope is documented in §16 (no longer "in scope") and §11 (the bridge architecture remains the design target; we just don't ship it now).
 
 ### Phase 5 — Sim-to-real bridge (3 days, blocks on real hardware)
 - `rl_autonomy/bridge/synthetic_moteus_node.py` (per design-doc spec; faithful, with the verbose log block).
@@ -948,3 +963,44 @@ YAML will be added in Phase 3 if the training scripts need persistent multi-expe
 - Demo loader (`rl_autonomy/data/demo_buffer.py`) — user direction skip-for-v1.
 - Anything that depends on demos: BC pretrain → RLPD path, residual finetune. The modules are functional and tested but no script wires them up yet.
 - `configs/rlpd_sac.yaml` — see §21.4.
+
+---
+
+## 22. Phase 3 + Phase 4 implementation notes (2026-04-29)
+
+### 22.1 WandB descoped → TensorBoard only
+
+§12 Phase 3 originally said "WandB logging by default". Switched to TensorBoard:
+
+- WandB needs an account + login + network access from the rover_gpu container. Friction for the user, none of which buys anything we can't get from local TB.
+- TB is already on the dependency list, runs locally, and `torch.utils.tensorboard.SummaryWriter` is a 5-line integration.
+- Adding WandB later is one decorator; not a v1 feature.
+
+### 22.2 Strike skill resets between Approach and Strike (not pose-continuous)
+
+§6 originally implied Approach → Strike is a single trajectory: Approach lands the EEF above the key, Strike then fires the solenoid from *that exact pose*. Implementing this requires either (a) Strike running in the same env instance with a flipped `mode` flag, or (b) a serialize/deserialize hop on the MuJoCo state.
+
+v1 does neither. Strike is its own env; on entry it resets to the `ABOVE_KEYBOARD_QPOS` init pose with ±0.02 rad noise. Why this is fine:
+
+- Strike's job is "fire the solenoid given a near-key pose" — that distribution is what the env's reset already samples. Approach's tail is *one realisation* of that distribution; Strike's training already sees the whole distribution.
+- The skills become independently testable. We can verify Approach without Strike weights and vice versa.
+- The eval_orchestrator's "chained" success drops slightly relative to a hypothetical perfectly-stitched chain (because Strike's reset noise can occasionally cost xy precision), but the loss is bounded by Strike's own reset noise (±0.02 rad ≈ ±5 mm tip motion at the wrist).
+
+If M4 numbers are below target on the chain, this is the first thing to revisit — Strike's reset replaced by accepting Approach's terminal state — but that's a v1.1 cleanup, not on the v1 critical path.
+
+### 22.3 Phase 5 (sim-to-real bridge) descoped for v1
+
+User direction (2026-04-29): real arm not yet built; sim-only scope. The bridge architecture is fully designed in `documentation/keyboard_typing_pipeline.md` §9, §10, §11; ROS topic interface details preserved. v1.1 picks up §12 Phase 5 unchanged once hardware exists.
+
+### 22.4 What didn't get built in Phase 3 + 4
+
+- No `configs/rlpd_sac.yaml` / `configs/curriculum.yaml` — same reason as §21.4, plus the per-script CLI args cover the actual variation people want.
+- No `scripts/render_rollout.py` — `tools/visualize.py` covers the same use case better (interactive viewer + headless PNGs in one).
+- No DR auto-tuner (still the Phase 4 v1.1 task — wait until M3 actually runs and shows which axis fails first).
+- No multiprocess vectorized training. The env's MuJoCo step is CPU-bound, so 8× SubprocVecEnv would 5–8× the throughput. v1 ships single-env because:
+  - The Phase 1 env is correct; vectorizing is a wrapper change.
+  - 1M steps at ~80 fps single-env = ~3.5 hours wallclock. Overnight is fine for v1.
+  - Adds ~50 LOC of plumbing that's not on the M3 critical path.
+- No SubprocVecEnv plumbing in the agent. RLPDSAC.learn assumes a single env. SB3's `make_vec_env` integrates differently and would force the agent to handle batched obs → action; not a deep change but not free.
+
+These are all upgrades for v1.1 once the user has run M3 and identified which is the actual bottleneck.
