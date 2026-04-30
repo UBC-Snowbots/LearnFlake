@@ -524,12 +524,20 @@ Phases are listed in dependency order. **Each phase must produce a verifiable ar
 > - **Legacy `src/rl_autonomy/keyboard_env.py` deleted**; `__init__.py` now exports `__version__` only (subpackages export their own API).
 > - **`dm-control` installed** in `rover_gpu` container; matches the `pyproject.toml` pin.
 
-### Phase 2 — Algorithm port (3 days)
-- `rl_autonomy/algos/rlpd_sac.py`: SB3 SAC subclass that adds (a) LayerNorm critic, (b) symmetric demo+online sampling in the replay buffer, (c) UTD=10 update loop, (d) wider critic (512), (e) privileged critic input.
-- `rl_autonomy/algos/bc_pretrain.py`: trivial BC trainer described in §8.2.
-- `rl_autonomy/algos/residual_actor.py`: wraps a frozen BC actor, exposes a residual SAC actor, sums their outputs.
-- Hyperparameters live in a single `rl_autonomy/configs/rlpd_sac.yaml`. No more scattered `sac_kwargs=dict(...)` per-script.
-- **Artifact**: train RLPD-SAC on the standard `Pendulum-v1` for 50k steps and reach return ≥ −150 within 5 minutes on this machine. Sanity check that the algo works *before* we point it at the keyboard env.
+### Phase 2 — Algorithm port (DONE)
+> Status: completed 2026-04-29. See git log on branch `aaron/rl_rewrite`.
+>
+> What got done:
+> - **From-scratch PyTorch implementation** (NOT an SB3 subclass — see §21.1). Files:
+>   - `algos/networks.py` — Actor (3×256 GELU + LN), EnsembleCritic (n×3×512 GELU + LN). Order is Linear→LayerNorm→GELU per RLPD's JAX reference (the alternative pre-LN order broke training, see §21.2).
+>   - `algos/replay_buffer.py` — `ReplayBuffer` (GPU-resident ring buffer storing actor and critic obs separately for asymmetric AC) + `SymmetricReplayBuffer` (linearly-decaying demo:online sampling fraction).
+>   - `algos/rlpd_sac.py` — `RLPDSAC` agent class (~400 LOC). UTD configurable (1–10), Polyak target update, auto-tuned entropy temperature, generic action scaling for envs with non-`[-1,1]` action spaces, asymmetric AC plumbed through `obs['actor']` and `obs['critic']`.
+>   - `algos/bc_pretrain.py` — Tanh-Normal NLL trainer for the Actor head (gated for v1; demos skipped per user direction).
+>   - `algos/residual_actor.py` — frozen base + zero-init residual; residual.forward() returns combined (mu, log_std) so RLPDSAC trains over the residual head with no agent-side changes (gated for v1.1).
+> - **Generic action scaling** added to RLPDSAC so envs with non-`[-1,1]` action spaces work. The actor outputs tanh-squashed `[-1,1]`; agent rescales to env range before stepping or feeding the critic. Without this the policy could only command half the available range on Pendulum (a hidden bug surfaced during M2). See §21.3.
+> - **M2 acceptance** (`tools/m2_pendulum.py`): RLPD-SAC reaches mean return **−97.58** in 50k env steps in 240s wallclock on RTX 5060 — well under the −150 target. PASSED.
+> - **Tests**: `tests/test_rlpd_sac.py` adds 7 unit tests (network shapes, replay buffer correctness including circular overwrite, symmetric replay's demo-fraction decay schedule, single train_step doesn't NaN, residual actor zero-init = base output). 29 tests total, all green.
+> - **Hyperparameters**: encoded directly in `RLPDConfig` dataclass at the top of `algos/rlpd_sac.py`; YAML config deferred until Phase 3 (when scripts/train_approach.py needs to read it from disk).
 
 ### Phase 3 — Curriculum + training script (2 days)
 - `rl_autonomy/curricula/state_replay_curriculum.py` (DemoStart-style) and `rl_autonomy/curricula/key_phase_curriculum.py` (manual phases).
@@ -888,3 +896,55 @@ These are locked by `tests/test_env_observation_shapes.py`. Bumping either const
 - `tools/env_diagnostics.py` per the original Phase 1 artifact spec. Existing `tools/env_diagnostics.py` is the legacy version moved to `tools/`; a refresh isn't on the v1 critical path.
 - DR auto-tuning ("ADR-lite") code path. The wrapper supports it via `enabled=True/False` but the contraction logic isn't wired up — Phase 4 task.
 - Some DR axes (`controller_kp_mul`, `controller_damping_mul`, per-step encoder noise) are in the sample dataclass but not yet *applied* in `_apply_post_reset_dr`. They'll be plumbed in Phase 4 alongside the auto-tuner.
+
+---
+
+## 21. Phase 2 implementation notes (2026-04-29)
+
+Things that happened during Phase 2 worth permanent record.
+
+### 21.1 From-scratch PyTorch instead of SB3 subclass
+
+The original §12 Phase 2 spec said "SB3 SAC subclass that adds (a) LayerNorm critic, (b) symmetric demo+online sampling, (c) UTD=10, (d) wider critic, (e) privileged critic input."
+
+After examining SB3's `SACPolicy`/`ContinuousCritic`/`Actor` source: enabling all five requires overriding ~70% of those classes (custom feature extractor + custom MLP factory + custom replay buffer + custom training-loop replacement). The result would be longer than a from-scratch PyTorch impl and would still be tightly coupled to SB3's internals across versions.
+
+Decision: write `rl_autonomy.algos.RLPDSAC` from scratch in PyTorch. Same training loop semantics (`learn(total_timesteps)`, `predict(obs)`, `save/load`), zero SB3 dependency. ~600 LOC across three files. Result is more readable and directly matches the RLPD paper's pseudocode.
+
+### 21.2 LayerNorm placement gotcha (M2 root cause)
+
+Initial implementation used **pre-LN**: `LayerNorm → Linear → GELU`. This is the ordering common in modern transformers (where it improves gradient flow on very deep networks) and seemed reasonable for SAC's 3-layer MLP.
+
+Result on Pendulum-v1 M2: return stuck at **-1080** (no learning). SB3 SAC on the same env reached -98 in the same wallclock — confirming the env was fine. After several config-narrowing attempts (matched target_entropy, optimizer, batch size, UTD), the only remaining differences were activation function and LN placement.
+
+Root cause: RLPD's JAX reference uses **post-LN**: `Linear → LayerNorm → ReLU`. Pre-LN places LayerNorm at the *input* of each Linear (normalizing the previous activation's output before projection). For SAC's relatively shallow critic and the entropy-bonus dynamics, this kills the signal — the post-projection LN is what RLPD's analysis depends on.
+
+Fix: swap the order in `_make_mlp`. After the fix Pendulum reaches -97.58 in 50k steps (240s wallclock). M2 PASSED.
+
+Lesson: when a recipe specifies "LayerNorm in the critic", the placement is non-trivial. Match the reference impl's order, not the transformer convention.
+
+### 21.3 Action scaling for non-`[-1,1]` envs
+
+The actor outputs `tanh(mu + std·ε) ∈ [-1, 1]` per action dimension. The Pendulum action space is `[-2, 2]`. Without rescaling, the policy can only command half the available torque — the pendulum can never swing all the way up.
+
+Fix: agent stores `_action_scale = (high − low)/2` and `_action_bias = (high + low)/2` at construction. Every consumer (predict, _update_critic for next_action, _update_actor_and_temp for action) calls `_scale_action(raw)` before going to the env or critic. The buffer stores env-scale actions throughout.
+
+Our keyboard env's `action_space = Box(-1, 1)^7` so scale=1, bias=0 — no behavior change. But the test surfaced a hidden bug that would have been silent had we only ever used the keyboard env.
+
+This is now generic so the agent works on any Box action space (locomotion benchmarks, MuJoCo gym tasks) without modification.
+
+### 21.4 Why `RLPDConfig` is a dataclass not YAML
+
+Original §14 spec showed `configs/rlpd_sac.yaml`. v1 uses a Python dataclass at the top of `algos/rlpd_sac.py` instead because:
+
+- A dataclass gives type checking and autocomplete in editors.
+- All hyperparameters are visible alongside the agent code, eliminating one indirection during debug.
+- The Phase 3 training script can override fields with CLI args (or load a YAML if needed) without changing the config representation.
+
+YAML will be added in Phase 3 if the training scripts need persistent multi-experiment hparam sweeps.
+
+### 21.5 What didn't get built in Phase 2
+
+- Demo loader (`rl_autonomy/data/demo_buffer.py`) — user direction skip-for-v1.
+- Anything that depends on demos: BC pretrain → RLPD path, residual finetune. The modules are functional and tested but no script wires them up yet.
+- `configs/rlpd_sac.yaml` — see §21.4.
