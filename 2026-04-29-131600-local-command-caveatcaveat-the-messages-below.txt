@@ -1,0 +1,322 @@
+ ▐▛███▜▌   Claude Code v2.1.123
+▝▜█████▛▘  Opus 4.7 · Claude Pro
+  ▘▘ ▝▝    ~/Documents/rover/LearnFlake
+
+❯ /model                                                                        
+  ⎿  Set model to Opus 4.7
+
+❯ pretend like you are a researcher and highly technical robotics software      
+  engineer with 20 years of experience in the field of RL in robotics. I want   
+  you to do research on all the different ways RL is being applied in robotic   
+  manipulators from 10 years ago all the way up to the current present.         
+  Everytime you learn something, I want you to understand how to build it       
+  technically by validating your knowledge with subsequent searches. Your main  
+  programming language in Python. Prioritize reading tons of github             
+  documentation although to start out, feel free to browse the entire internet. 
+   When you are finally done, then I want you to examine the rl_autonomy/       
+  folder and take all of the code in it with a grain of salt. None of the code  
+  was written by an expert. Then, I want you to develop a whole TRACKER.md file 
+   stating how you would completely rewrite the policies, reward functions, and 
+   everything so that they use the most intricate, reliable, and advanced RL    
+  models/structures known-to-date. You should be spending at least 20 minutes   
+  on the researching and validation and only when you are done, are you         
+  permitted to develop the TRACKER. The idea for this is simple, the TRACKER    
+  should contain as much information as possible for you to then execute the    
+  idea and absolutely make sure it will work with minimal training one-shot on  
+  the custom 6-DOF manipulator in this repository. Start.                       
+
+● I'll begin systematic research on RL for robotic manipulation, spanning
+  ~2015-2026. Let me set up tracking and launch parallel research streams.
+
+● Web Search("SAC soft actor critic robotic manipulation github implementation
+            2024")
+  ⎿  Did 1 search in 6s
+
+● Web Search("diffusion policy robotic manipulation github Cheng Chi 2024")
+  ⎿  Did 1 search in 8s
+
+● Web Search("residual reinforcement learning robotic manipulation peg insertion
+             2024")
+  ⎿  Did 1 search in 9s
+
+● Web Search("ManiSkill3 Isaac Lab benchmark sim-to-real 2025")
+  ⎿  Did 1 search in 9s
+● Web Search("SERL HIL-SERL human-in-the-loop reinforcement learning
+            manipulation github")
+  ⎿  Did 1 search in 7s
+
+● Web Search("RLPD reset-free reinforcement learning manipulation efficient real
+             world")
+  ⎿  Did 1 search in 8s
+
+● Web Search("DroQ REDQ DrQ-v2 efficient model-free RL robot manipulation
+            pixel")
+  ⎿  Did 1 search in 7s
+
+● Web Search("action chunking ACT bimanual manipulation imitation learning
+            github")
+  ⎿  Did 1 search in 8s
+
+● Fetch(https://github.com/rail-berkeley/hil-serl)
+  ⎿  Received 272.4KB (200 OK)
+
+● Fetch(https://github.com/real-stanford/diffusion_policy)
+  ⎿  Received 429.3KB (200 OK)
+
+● Web Search("domain randomization sim2real OpenAI dactyl ADR automatic
+            curriculum manipulation")
+  ⎿  Did 1 search in 8s
+
+● Web Search("PPO Isaac Lab Orbit large scale parallel training manipulation
+            policy 2025")
+  ⎿  Did 1 search in 9s
+
+● Web Search(""reward shaping" robot manipulation PBRS potential based 2024 best
+             practices")
+  ⎿  Did 1 search in 9s
+
+● Web Search("operational space controller robosuite OSC_POSE OSC_POSITION
+            action space RL")
+  ⎿  Did 1 search in 8s
+
+● Web Search("DAPG demo-augmented policy gradient hand manipulation github
+            Aravind Rajeswaran")
+  ⎿  Did 1 search in 7s
+
+● Web Search("RoboPianist piano playing RL bimanual github 2024 multi-finger")
+  ⎿  Did 1 search in 8s
+
+● Fetch(https://github.com/kevinzakka/robopianist-rl)
+  ⎿  Received 262.4KB (200 OK)
+
+● Fetch(https://github.com/google-research/robopianist)
+  ⎿  Received 327.8KB (200 OK)
+
+● Web Search("CrossQ batch normalization actor critic sample efficient
+            continuous control 2024 github")
+  ⎿  Did 1 search in 8s
+● Web Search(""task and motion planning" RL primitive sequencing keyboard typing
+             manipulation")
+  ⎿  Did 1 search in 9s
+
+● Let me start examining the codebase in parallel with continuing research.
+
+  Searched for 1 pattern, listed 1 directory (ctrl+o to expand)
+
+● Web Search(""factory" Isaac Lab peg insertion contact-rich PPO sim-to-real
+            2025 nvidia")
+  ⎿  Did 1 search in 7s
+
+● Web Search("curriculum learning automatic robot manipulation goal generation
+            success rate")
+  ⎿  Did 1 search in 9s
+
+  Read 4 files (ctrl+o to expand)
+
+● Web Search(""frame stacking" or "history" recurrent policy partial
+            observability RL manipulation")
+  ⎿  Did 1 search in 8s
+
+● Web Search(""residual policy learning" base controller IK trajectory RL Silver
+             2018 manipulation")
+  ⎿  Did 1 search in 7s
+
+● Web Search("SAC observation normalization layer norm running mean robot
+            learning stability")
+  ⎿  Did 1 search in 7s
+
+  Searched for 1 pattern, read 2 files (ctrl+o to expand)
+
+● Web Search(""PointNet" or "Transformer" tactile vision policy contact rich
+            manipulation 2024 github")
+  ⎿  Did 1 search in 10s
+
+● Web Search("DeepMind robot dexterous DReg DRPO impedance control sim2real
+            factory peg insertion 2024")
+  ⎿  Did 1 search in 8s
+
+● Fetch(https://github.com/kevinzakka/robopianist-rl/blob/main/sac.py)
+  ⎿  Received 327.2KB (200 OK)
+
+● Fetch(https://github.com/kevinzakka/robopianist-rl/blob/main/train.py)
+  ⎿  Received 299.3KB (200 OK)
+
+● Web Search(""asymmetric actor critic" privileged observation sim2real teacher
+            student manipulation")  ⎿  Did 1 search in 9s
+
+● Web Search("end effector body jacobian RL action space differential IK
+            pseudoinverse safe robot")
+  ⎿  Did 1 search in 8s
+
+● Web Search("IndustReal NVIDIA contact-rich peg insertion RL policy
+            distillation transfer 2024")
+  ⎿  Did 1 search in 11s
+
+● Web Search(""sparse reward" "n-step" "her" "hindsight experience replay"
+            manipulation 2024 best practice")
+  ⎿  Did 1 search in 9s
+
+● Fetch(https://github.com/google-research/robopianist/blob/main/robopianist/sui
+       te/tasks/piano_with_shadow_hands.py)
+  ⎿  Received 429KB (200 OK)
+
+● Web Search("dm_control tolerance reward function sigmoid bounds robot
+            manipulation")
+  ⎿  Did 1 search in 8s
+
+● Web Search(""control_freq" "action_scale" "smoothness penalty" RL real robot
+            deployment 2024")
+  ⎿  Did 1 search in 9s
+
+● Web Search("Stable-Baselines3 SAC tips HerReplayBuffer manipulation
+            goal-conditioned")
+  ⎿  Did 1 search in 6s
+
+  Read 1 file (ctrl+o to expand)
+
+● Web Search(""impedance control" RL contact rich variable stiffness
+            manipulation safe sim-to-real 2024")
+  ⎿  Did 1 search in 9s
+
+● Web Search(""finetune" "diffusion policy" RL DPPO IDQL IBRL 2024
+            manipulation")
+  ⎿  Did 1 search in 9s
+
+  Read 1 file (ctrl+o to expand)
+
+● Web Search(""Rover2026" "moteus" 6-dof manipulator JOINT_VELOCITY robosuite
+            custom robot")
+  ⎿  Did 1 search in 7s
+
+● Fetch(https://github.com/irom-princeton/dppo)
+  ⎿  Received 328.9KB (200 OK)
+
+● Web Search(""primitive composition" "MAPLE" "PARROT" "skill prior"
+            manipulation hierarchical RL 2024")
+  ⎿  Did 1 search in 8s
+
+● Web Search(""TQC" truncated quantile critics overestimation continuous control
+             SAC robot 2024")
+  ⎿  Did 1 search in 7s
+
+● Web Search(""action repeat" "frame skip" sample efficiency robot manipulation
+            MDP SAC")
+  ⎿  Did 1 search in 7s
+
+  Read 2 files (ctrl+o to expand)
+
+● Web Search(""normalize observations" "VecNormalize" stable-baselines3 gym
+            wrapper sb3 best practice")
+  ⎿  Did 1 search in 7s
+
+● Web Search(""learning from scratch" sample efficient peg insertion 15 minutes
+            real robot RL paper")
+  ⎿  Did 1 search in 7s
+● Web Search(""BRO" "Bigger Better Faster" "scaling RL" continuous control
+            critic ensemble 2024")
+  ⎿  Did 1 search in 7s
+
+● Web Search(""task primitive" "OSC controller" robosuite custom env keyboard
+            typing sim 2024")
+  ⎿  Did 1 search in 6s
+
+● Web Search(""DemoStart" demonstration auto-curriculum dexterous manipulation
+            DeepMind 2024 sim2real")
+  ⎿  Did 1 search in 9s
+
+● Web Search(""early termination" "horizon" "discount" "sparse reward" SAC
+            manipulation tuning practical")
+  ⎿  Did 1 search in 8s
+
+  Read 1 file (ctrl+o to expand)
+
+● Web Search(""sb3-contrib" TQC CrossQ ARS DroQ hyperparameters manipulation
+            HumanoidBenchmark")
+  ⎿  Did 1 search in 8s
+
+● Web Search(""residual" "behavior cloning" "diffusion" pretraining seed RL
+            precise 2024 robot github")
+  ⎿  Did 1 search in 12s
+
+  Read 2 files, listed 2 directories (ctrl+o to expand)
+
+● I've completed extensive research. Let me now examine the remaining critical
+  pieces and write the TRACKER.
+
+  Read 1 file (ctrl+o to expand)
+
+● Web Search(""6-DOF arm" RL policy custom mujoco urdf joint actuator robosuite
+            1.5 control_freq")
+  ⎿  Did 1 search in 8s
+
+● Now I have enough material. Let me write the TRACKER.md.
+
+● Write(TRACKER.md)
+  ⎿  Wrote 725 lines to TRACKER.md
+        yboard Typing— Complete Rewrite of `rl_autonomy/` for One-Shot Ke
+      3 > Author persona: 20-year RL-robotics researcher. Audience: imple
+      4 > Status: planning document. **Do not touch existing checkpoints 
+        until Phase 0 is complete.**
+      6 This document is the contract for an end-to-end rewrite of every 
+        arnFlake keyboard-typing pipeline on the custom Rover2026 6-DOF a
+        rm + solenoid actuator.
+      8 The rewrite has one functional target: **a policy stack that, aft
+        rary multi-key sequences on a Redragon K552 TKL keyboard, both in
+         MuJoCo an
+     … +1201 lines (ctrl+o to expand)
+● TRACKER.md is written at /home/arhim/Documents/rover/LearnFlake/TRACKER.md —
+  18 sections, ~700 lines.
+
+  Research summary (what fed the rewrite):
+  - Algorithms: validated SAC → RLPD/SERL → CrossQ (ICLR'24) → BRO (NeurIPS'24);
+   chose RLPD-SAC w/ LayerNorm critic, UTD=10, symmetric demo+online sampling.
+  - Modern recipes: Diffusion Policy, ACT, DPPO, ResiP, HIL-SERL, RoboPianist
+  (closest analog), DemoStart auto-curriculum.
+  - Sim-to-real: Factory/IndustReal (SAPU+SBC+SDF reward+PLAI), asymmetric AC w/
+   privileged critic, ADR, residual-on-real fine-tune.
+  - Action space: validated robosuite paper finding that OSC_POSE trains faster 
+  than JOINT_VELOCITY on every benchmark (current code uses JOINT_VELOCITY — a
+  major bug).
+  - Reward design: dm_control's tolerance(...) primitive + PBRS for policy
+  invariance.
+
+  Critical issues identified in rl_autonomy/ (TRACKER §1, 28 numbered issues):
+  - Wrong action space (JOINT_VELOCITY for contact-rich), 9 over-engineered
+  skills, hand-tuned magic-number rewards with discontinuous +1000 bonuses,
+  world-frame goal kills DR generalization, raw quaternion not 6-D rep, no obs
+  normalization, single-frame Markov assumption breaks contact detection,
+  latency wrong, DR too narrow (7 axes vs 18 needed), no demos wired in,
+  DomainRandWrapper isn't a proper Gym wrapper, HRL still present despite being
+  abandoned in design doc, gym/gymnasium import shim everywhere.
+
+  Concrete plan in TRACKER §12 (6 phases, ~13 working days), §13 (target file
+  tree showing −4k LOC / +2k LOC), §14 (full hyperparameter YAML), §15 (M1–M5
+  pass/fail validation gates).
+
+  The TRACKER is self-contained and executable: every config value is named,
+  every hyperparameter has a YAML stub, every phase has a verifiable artifact,
+  and §16 lists the top 7 risks with mitigations. All sources are cited in §17.
+
+  Sources:
+  - HIL-SERL · Diffusion Policy · DPPO · ResiP · Residual Off-Policy RL · CrossQ
+   · BRO · DrQ-v2 · ACT/ALOHA · RoboPianist · robopianist-rl · DemoStart ·
+  IndustReal/IndustRealLib · ManiSkill3 · Isaac Lab · robosuite OSC docs ·
+  dm_control rewards · TQC in sb3-contrib · DAPG · Asymmetric AC paper · Domain 
+  Randomization review · Residual Policy Learning · PLANRL
+
+✻ Brewed for 16m 46s
+
+❯ /plugin install superpowers@claude-plugins-official                           
+  ⎿  ✓ Installed superpowers. Run /reload-plugins to apply.
+
+❯ /reload-plugins                                                               
+  ⎿  Reloaded: 1 plugin · 3 skills · 6 agents · 1 hook · 0 plugin MCP servers · 0 plugin LSP servers
+
+❯ Alright lets get to the implementation.                                       
+
+● Skill(superpowers:using-superpowers)
+  ⎿  Successfully loaded skill
+
+● Skill(superpowers:executing-plans)
+  ⎿  Successfully loaded skill
+  ⎿  Interrupted · What should Claude do instead?
