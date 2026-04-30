@@ -9,11 +9,11 @@ warnings.filterwarnings("ignore")
 
 
 def test_approach_reward_bounds_static_claim():
-    """The TRACKER §5.2 claim: total ∈ [-0.2, 2.0]."""
+    """Per-step bounds after the §23 reward fix: total ∈ ~[-2.05, 200.95]."""
     from rl_autonomy.envs.rewards import approach_reward_bounds
     lo, hi = approach_reward_bounds()
-    assert lo == pytest.approx(-0.2)
-    assert hi == pytest.approx(2.0)
+    assert lo == pytest.approx(-2.05)
+    assert hi == pytest.approx(200.95)
 
 
 def test_approach_reward_within_bounds_on_random_inputs():
@@ -35,12 +35,30 @@ def test_approach_reward_within_bounds_on_random_inputs():
 
 
 def test_approach_reward_perfect_state():
-    from rl_autonomy.envs.rewards import approach_reward
+    from rl_autonomy.envs.rewards import approach_reward, APPROACH_W_TIME, APPROACH_W_SUCCESS
     c = approach_reward(0.0, 0.0, 0.0, 0.0, success=True, collision=False)
-    # 0.5 + 0.3 + 0.15 + 0.05 (all dense terms = 1.0) + 1.0 success bonus
-    assert c.total == pytest.approx(1.0 + 0.5 + 0.3 + 0.15 + 0.05)
-    assert c.r_success == 1.0
+    # all dense = 1.0 (sums to 1.0) + success bonus + per-step time penalty
+    assert c.total == pytest.approx(APPROACH_W_SUCCESS + 1.0 + APPROACH_W_TIME)
+    assert c.r_success == APPROACH_W_SUCCESS
     assert c.r_collision == 0.0
+
+
+def test_approach_reward_success_dominates_dense_episode():
+    """Per TRACKER §23: a 200-step hovering episode at near-max dense must
+    yield strictly less reward than a single-step success episode."""
+    from rl_autonomy.envs.rewards import approach_reward, APPROACH_W_TIME
+    horizon = 200
+    # Hover at the bound: dense ≈ 1.0 per step, no success, no collision
+    hover_per_step = approach_reward(0.005, 0.006, 0.1, 0.0,
+                                     success=False, collision=False).total
+    hover_episode = horizon * hover_per_step
+    # Success on the very first step (hypothetical lower bound on success ep)
+    success_step = approach_reward(0.0, 0.0, 0.0, 0.0,
+                                   success=True, collision=False).total
+    assert success_step > hover_episode, (
+        f"hovering for full episode ({hover_episode:.1f}) outweighs single-step success "
+        f"({success_step:.1f}); reward shape still buggy"
+    )
 
 
 def test_approach_reward_collision_penalizes():

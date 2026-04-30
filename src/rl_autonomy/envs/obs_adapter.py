@@ -252,6 +252,16 @@ class ObsAdapter(gym.Wrapper):
         self.training = training
         self.clip = clip
 
+    @property
+    def rms(self) -> RunningMeanStd:
+        """Access the RunningMeanStd accumulator (so train/eval envs can share)."""
+        return self._rms
+
+    @rms.setter
+    def rms(self, new_rms: RunningMeanStd) -> None:
+        """Replace the accumulator. Used to share train env's stats with eval env."""
+        self._rms = new_rms
+
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
         return self._normalize(obs), info

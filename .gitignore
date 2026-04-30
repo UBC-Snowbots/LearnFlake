@@ -89,3 +89,7 @@ src/rl_autonomy/__pycache__
 # Visualization output (frames saved by tools/visualize.py)
 viz_demo/
 **/viz_frames/
+
+# trained policy checkpoints anywhere in the tree
+**/checkpoints/
+**/logs/

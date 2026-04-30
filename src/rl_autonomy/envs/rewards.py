@@ -1,10 +1,13 @@
 """Tolerance-based reward functions for Approach and Strike skills.
 
 Built on `dm_control.utils.rewards.tolerance` (RoboPianist's reward primitive).
-Each shaping term is bounded in [0, 1]; total dense reward is in [-1, 2].
+Each shaping term is bounded in [0, 1]. The success bonus is large (100) so
+finishing the task and ending the episode strictly dominates accumulating
+dense reward over a full 200-step horizon.
 
-See TRACKER §5 for the full design and rationale (PBRS layered separately
-inside the env to preserve the optimal policy of the sparse-success MDP).
+See TRACKER §5 for the design rationale and §23 for the 2026-04-29
+mid-training fix that introduced the large success bonus + time penalty
+after observing a hovering optimum with the original 1.0 / -0.2 weights.
 """
 from __future__ import annotations
 
@@ -43,8 +46,21 @@ APPROACH_W_TILT = 0.15
 APPROACH_W_SMOOTH = 0.05
 
 # Sparse / penalty weights — applied on top of dense shaping.
-APPROACH_W_SUCCESS = 1.0
-APPROACH_W_COLLISION = -0.2
+#
+# IMPORTANT: success bonus must dominate the per-episode dense-reward sum.
+# Episode horizon = 200; max dense per step ≈ 1.0; an agent hovering near
+# the goal can accumulate ~190 reward without ever triggering success and
+# ending the episode. Success bonus = 100 plus a per-step time penalty
+# makes "drive to goal, trigger success, end episode" strictly higher
+# value than "hover indefinitely".
+#
+# Original v1 values were 1.0 / -0.2 with no time penalty — that produced
+# a hovering optimum (training return plateaued at ~180 with 0% success).
+# Fixed 2026-04-29 mid-training. See TRACKER §23.
+APPROACH_W_SUCCESS = 200.0          # higher than originally proposed; needs to beat
+                                    # 200·max_dense (≈198) so hover < success.
+APPROACH_W_COLLISION = -2.0
+APPROACH_W_TIME = -0.05            # per-step penalty; -10 over a 200-step horizon
 
 
 @dataclass
@@ -56,6 +72,7 @@ class ApproachRewardComponents:
     r_smooth: float
     r_success: float
     r_collision: float
+    r_time: float
     total: float
 
 
@@ -78,7 +95,9 @@ def approach_reward(
         collision: True iff the EEF or actuator collided with the keyboard surface.
 
     Returns:
-        Component breakdown plus total. Total ∈ approximately [-0.2, 2.0].
+        Component breakdown plus total. Total ∈ approximately [-2.01, 101].
+        (Wide range because success bonus = 100 dominates; per-episode
+        return is bounded ~ [-2.01·H, dense·H + 100].)
     """
     r_xy = float(dm_rewards.tolerance(
         xy_dist, bounds=APPROACH_XY_BOUNDS,
@@ -105,6 +124,7 @@ def approach_reward(
     )
     r_success = APPROACH_W_SUCCESS if success else 0.0
     r_collision = APPROACH_W_COLLISION if collision else 0.0
+    r_time = APPROACH_W_TIME
 
     return ApproachRewardComponents(
         r_xy=r_xy,
@@ -113,7 +133,8 @@ def approach_reward(
         r_smooth=r_smooth,
         r_success=r_success,
         r_collision=r_collision,
-        total=dense + r_success + r_collision,
+        r_time=r_time,
+        total=dense + r_success + r_collision + r_time,
     )
 
 
@@ -218,16 +239,17 @@ def pbrs_term(
 def approach_reward_bounds() -> tuple[float, float]:
     """Return (min, max) of Approach total reward across the reachable input domain.
 
-    Used by tests/test_reward_bounds.py to assert TRACKER's "[-0.2, 2.0]" claim.
+    Used by tests/test_reward_bounds.py.
     """
-    # Worst case: collision flag set, every dense term is 0 (very far from goal).
-    lo = APPROACH_W_COLLISION
-    # Best case: success bonus + every dense term = 1.
+    # Worst case: collision + dense terms all zero (very far from goal) + time penalty
+    lo = APPROACH_W_COLLISION + APPROACH_W_TIME
+    # Best case: success bonus + every dense term = 1 + time penalty (always present)
     hi = (
         APPROACH_W_SUCCESS
         + APPROACH_W_XY
         + APPROACH_W_Z
         + APPROACH_W_TILT
         + APPROACH_W_SMOOTH
+        + APPROACH_W_TIME
     )
     return lo, hi

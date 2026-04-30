@@ -1004,3 +1004,63 @@ User direction (2026-04-29): real arm not yet built; sim-only scope. The bridge 
 - No SubprocVecEnv plumbing in the agent. RLPDSAC.learn assumes a single env. SB3's `make_vec_env` integrates differently and would force the agent to handle batched obs → action; not a deep change but not free.
 
 These are all upgrades for v1.1 once the user has run M3 and identified which is the actual bottleneck.
+
+---
+
+## 23. Mid-training reward + normalizer fix (2026-04-30)
+
+The user kicked off the first M3 Approach run. After 140k steps:
+
+- Training episode return plateaued at ~150–180 (ceiling for the 200-step horizon × max-dense ≈ 1.0/step ≈ 200).
+- Eval return stuck at ~70 — never improved.
+- α collapsed from 1.0 → 0.006 by step 100k (policy nearly deterministic).
+- Curriculum stayed in Phase 0 throughout; rolling success near zero.
+
+### 23.1 Diagnosis 1 — dense reward dominated success bonus
+
+Per-episode reward arithmetic with the original `APPROACH_W_SUCCESS=1.0`:
+
+| Policy | Per-step dense | Success bonus | Steps | Total |
+|---|---|---|---|---|
+| Hover at 5 mm from goal | ~0.99 | 0 (never triggers) | 200 | **~198** |
+| Drive into success region | ~0.5 ramp | 1.0 (terminal) | ~50 | **~26** |
+
+Hovering yielded ~7.6× more reward than finishing. The agent was correctly maximizing reward — by **not** ending the episode. Classic shaping-vs-sparse pathology that I had introduced by setting the success weight equal to a per-step dense weight and removing the time penalty per the original §5.5.
+
+§5.5 originally said "rely on γ < 1 as the implicit time penalty" — but γ=0.99 over 200 steps gives γ^200 ≈ 0.13, which doesn't dominate when the per-step dense reward is comparable to the success bonus.
+
+### 23.2 Fix 1 — bigger success bonus + explicit time penalty
+
+| Constant | Before | After | Why |
+|---|---|---|---|
+| `APPROACH_W_SUCCESS` | 1.0 | **200.0** | Beats `200·max_dense ≈ 198`, so success policy strictly dominates hover. |
+| `APPROACH_W_COLLISION` | -0.2 | **-2.0** | Scale-matched to the rest. |
+| `APPROACH_W_TIME` | (absent) | **-0.05** | Per-step time pressure, -10 over a 200-step horizon. |
+
+A new test (`tests/test_reward_bounds.py::test_approach_reward_success_dominates_dense_episode`) asserts the relationship numerically — a 200-step hovering trajectory at `xy=5 mm, z=6 mm, tilt=5.7°` (just outside the success bound) accumulates strictly less than a single-step success episode. This catches future regressions the moment a weight gets bumped the wrong way.
+
+### 23.3 Diagnosis 2 — train/eval observation normalization mismatch
+
+The training env and eval env each have their own `ObsAdapter`, and each runs its own `RunningMeanStd` accumulator. The training one updated for ~140k steps and was well-calibrated; the eval one only saw the few hundred steps of each periodic eval and was essentially identity-normalized. So eval observations were on a wildly different scale than what the policy was trained on, confounding the eval reading with a normalization shift.
+
+### 23.4 Fix 2 — share the RMS accumulator between train and eval
+
+`ObsAdapter` now exposes the underlying `RunningMeanStd` via a `.rms` property + setter. `train_approach.py` calls `_share_normalizer(train_env, eval_env)` before agent construction, which:
+
+1. Points the eval env's `_rms` at the training env's accumulator (shared object — train updates flow to eval automatically).
+2. Sets `eval_env.training = False` so the eval env never updates the stats itself.
+
+### 23.5 What this changes downstream
+
+- §5.2 weights and reward bounds are different. Per-step bound is now `[-2.05, 200.95]`; per-episode return bound is on the order of `[-410, 250]`. The wider range means the critic Q-values will span a larger range during training; LayerNorm + AdamW + bounded actions handle this.
+- §15 M1 is unaffected (M1 doesn't depend on reward shape).
+- §15 M3 needs to be re-run from scratch with the new reward. The 140k-step checkpoint is unusable.
+- §15 M4 uses M3's checkpoint, so it's also a re-run.
+- Tests updated: `test_approach_reward_bounds_static_claim` checks the new bounds; `test_approach_reward_perfect_state` references the new constants symbolically (not hard-coded).
+
+### 23.6 Lessons
+
+- Shaping rewards need a sparse-bonus floor that *strictly dominates* `H · max(shaping)` where `H` is the horizon. Otherwise the policy eats the shaping forever.
+- Per-step time penalty is a cheap stabilizer. The original §5.5 instinct ("γ does this implicitly") is wrong for short horizons + non-trivial shaping.
+- Train/eval observation normalizer drift is invisible from the metric you usually look at (training return) and very visible from the one you don't (eval return). Always share or freeze stats.
+- A "the success policy beats the hover policy" unit test is cheap and catches the reward-design bug instantly. Worth having from day 1 for any reward function with both shaping and sparse bonus.

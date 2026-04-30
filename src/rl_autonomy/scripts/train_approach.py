@@ -79,6 +79,31 @@ class CurriculumEnv(gym.Wrapper):
         return getattr(env, "underlying", env)
 
 
+def _find_obs_adapter(env):
+    """Walk the wrapper stack to find the ObsAdapter (which holds the RMS)."""
+    from rl_autonomy.envs.obs_adapter import ObsAdapter
+    cur = env
+    while True:
+        if isinstance(cur, ObsAdapter):
+            return cur
+        if hasattr(cur, "env"):
+            cur = cur.env
+            continue
+        return None
+
+
+def _share_normalizer(train_env, eval_env) -> None:
+    """Point the eval env's ObsAdapter at the train env's RMS, and freeze it."""
+    train_oa = _find_obs_adapter(train_env)
+    eval_oa = _find_obs_adapter(eval_env)
+    if train_oa is None or eval_oa is None:
+        print("[approach] warning: ObsAdapter not found in one of the envs; skipping RMS share")
+        return
+    eval_oa.rms = train_oa.rms        # share the underlying object — train updates flow to eval
+    eval_oa.training = False          # belt and suspenders: don't let eval update stats
+    print(f"[approach] eval env shares train env's RunningMeanStd accumulator (eval frozen)")
+
+
 # ---------------------------------------------------------------------------
 # TensorBoard logger
 # ---------------------------------------------------------------------------
@@ -162,6 +187,14 @@ def main() -> int:
     curriculum = KeyPhaseCurriculum(advance_threshold=0.85, window=200, seed=args.seed)
     train_env = CurriculumEnv(train_env, curriculum)
     eval_env = CurriculumEnv(eval_env, KeyPhaseCurriculum(seed=args.seed + 2))
+
+    # Share the train env's RunningMeanStd with the eval env so the eval policy
+    # sees the same normalization it was trained with. Without this, the eval
+    # env's RMS is barely populated and observations are mis-scaled by the time
+    # they reach the policy. Also freeze the eval env's RMS so it doesn't drift.
+    # (See TRACKER §23 — original v1 had independent RMSs and a 2.5× train/eval
+    # return gap that traced back to this.)
+    _share_normalizer(train_env, eval_env)
 
     cfg = RLPDConfig(
         update_to_data=args.utd,
