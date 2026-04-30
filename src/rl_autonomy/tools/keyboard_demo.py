@@ -28,7 +28,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(ROOT, ".."))
 sys.path.insert(0, os.path.join(ROOT, "..", "..", "external_pkgs", "RoboSuite"))
 
-from keyboard_env import KeyboardEnv
+from rl_autonomy.envs import KeyboardEnv
 
 # ── tunables ────────────────────────────────────────────────────────────────
 CART_SPEED   = 0.08    # m/s for translational moves

@@ -85,3 +85,7 @@ CLAUDE.md
 src/rl_autonomy/__pycache__
 # Claude Code worktrees
 .worktrees/
+
+# Visualization output (frames saved by tools/visualize.py)
+viz_demo/
+**/viz_frames/

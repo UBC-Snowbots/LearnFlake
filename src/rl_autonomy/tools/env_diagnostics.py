@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(ROOT, "..", "..", "external_pkgs", "RoboSuite"))
 
 import numpy as np
 
-from keyboard_env import KeyboardEnv
+from rl_autonomy.envs import KeyboardEnv
 
 # ---------------------------------------------------------------------------
 # Expected obs fields and their dimensions
