@@ -1064,3 +1064,84 @@ The training env and eval env each have their own `ObsAdapter`, and each runs it
 - Per-step time penalty is a cheap stabilizer. The original §5.5 instinct ("γ does this implicitly") is wrong for short horizons + non-trivial shaping.
 - Train/eval observation normalizer drift is invisible from the metric you usually look at (training return) and very visible from the one you don't (eval return). Always share or freeze stats.
 - A "the success policy beats the hover policy" unit test is cheap and catches the reward-design bug instantly. Worth having from day 1 for any reward function with both shaping and sparse bonus.
+
+---
+
+## 24. Performance optimization pass + parallelism analysis (2026-05-15)
+
+After §23's reward fix, did a profile-driven optimization pass + a code-review pass + an honest analysis of MJX/vectorized-envs for "many parallel simulations".
+
+### 24.1 Profile-driven hot-spot fixes
+
+`tools/profile_train.py` (new) runs a 2k-step Approach training run under cProfile. Initial result: 102.3 s wallclock, breakdown:
+
+| Phase | Time | % | Notes |
+|---|---|---|---|
+| Env step (robosuite controller) | 45.7 s | 45% | Controller called 25× per env step (sim_freq=500 / control_freq=20) |
+| Training step (UTD=2 in profile) | 41 s | 40% | Critic + actor + Polyak + temperature |
+| ↳ Polyak target update | 9.8 s | 10% | **2.8 ms/call** — way too high |
+| ↳ `nn.Module.parameters()` walks | 8 s | 8% | called 200k+ times in optimizer + Polyak |
+| MuJoCo physics (`mj_step1/2`) | 4.1 s | 4% | tiny |
+
+Fixes shipped in commit 9550935:
+
+1. **Cache critic + critic_target parameter lists** at agent construction. Polyak update goes from a per-call `parameters()` walk to a one-time list. Combined with `torch._foreach_lerp_`, the whole soft-update fits in a single fused kernel.
+
+2. **Skip `_get_observations(force_update=True)`** in `KeyboardEnv._build_obs_dict`. Cache the arm joint qpos/qvel indices and the EEF site at `_setup_references`; read `sim.data.qpos/qvel/site_xpos/site_xmat` directly. The robosuite observable pipeline recomputes everything declared; we only consume 8 fields, so it's pure overhead.
+
+3. **EEF orientation from `site_xmat → mat2quat`** (commit 37b5067), not `body_xquat`. Latter is faster but ignores any rotation offset the site has w.r.t. its parent body — silently breaks if anyone adds `<euler>` to the eef site in the MJCF. `mat2quat` is pure numpy.
+
+Re-profiled wallclock: **102.3 s → 89.1 s (15% faster)**. Polyak vanished from the top-30; obs build dropped to ~1%.
+
+### 24.2 Code-review pass
+
+1. **Three modules each had their own `_find_underlying` / `_find_keyboard_env` / `_find_obs_adapter`**. Consolidated into `envs/_wrapper_utils.py` with `find_inner(env, cls)` and `require_inner(env, cls)`. 4 new unit tests cover deep stacks, missing target, and the `.underlying` convention. Net: −5 inline functions, 1 authoritative helper.
+
+2. **`train_strike.py` wasn't calling `_share_normalizer`**. Same train/eval RMS drift bug §23.4 found in Approach. Fixed.
+
+3. **DomainRandWrapper action-latency buffer was a Python list with O(n) `pop(0)`**. Switched to `collections.deque` for O(1) `popleft`. Also fixed the "buffer-still-filling" path to hold the current action instead of zero-action — the latter would actively brake the arm for the first few steps of every DR episode.
+
+### 24.3 Parallelism — why no SubprocVecEnv in v1, why no MJX in v1
+
+Post-optimization breakdown for the same 2k-step run, **with UTD=10 (production setting, not UTD=2 from the profile)**:
+
+| Phase | Estimated time | % |
+|---|---|---|
+| Env (robosuite controller, 5× longer than physics) | 44 s | 22% |
+| Training step (5× the UTD=2 cost) | 155 s | 78% |
+
+Three options for "many parallel simulations":
+
+**Path A — lower UTD.** Cheaper training step, less sample efficiency. RLPD paper says UTD=10 ≈ 4× sample efficiency over UTD=1, so the wallclock to reach equivalent policy quality actually *worsens* at UTD=1. UTD=5 is a viable compromise but loses ~50% sample efficiency. **Not implemented in v1 — exposed via `--utd` CLI flag** so the user can experiment without code changes.
+
+**Path B — SubprocVecEnv / AsyncVectorEnv (8× parallel CPU envs).** At UTD=10 the training step dominates (78%), so parallelizing the env-side gives only a 1.2× wallclock speedup. Costs ~200–300 LOC of agent + replay-buffer changes. Risk: subtle bugs in batched obs / batched add / vectorized env_done handling. **Not implemented in v1** — the ROI is poor at production UTD. Reasonable v1.1 task once we know which axis actually bottlenecks M3.
+
+**Path C — MJX (MuJoCo on JAX/GPU).** The real path to *many* parallel sims. 1024+ envs running on GPU, both physics AND policy updates on-device. Estimated 50–200× total throughput on this hardware. Requires:
+  - Porting the Rover2026 + keyboard scene from robosuite/MJCF to `mujoco_playground` or pure MJX.
+  - Re-implementing the JOINT_POSITION controller in JAX (~150 LOC of PD math).
+  - Re-implementing the env wrappers and reward in JAX (~300 LOC).
+  - JAX-native agent (RLPD-SAC in flax/optax) or PyTorch agent via `jax2torch` interop.
+  - Workaround for the known sm_120 Blackwell JAX RNG nondeterminism (rerun-to-rerun differences; deterministic eval needs CPU mode).
+
+Total scope: **~2 weeks of focused work, plus the sm_120 risk**. Explicitly out of v1 scope. **Documented as v2.**
+
+### 24.4 Wallclock budget for the user's M3 run
+
+With v1's current setup (single env, UTD=10 production):
+
+| Metric | Value |
+|---|---|
+| Profile-extrapolated fps in production | ~10 (UTD-dominated) |
+| Empirical fps from the §23 run that hit the reward bug | 32–180 (warmup variance) |
+| Stable mid-training fps (after warmup) | ~35 |
+| 1 M env steps wallclock | ~8 hours |
+
+That fits the overnight budget without parallelism. If the user wants 2× turnaround for iterative debugging, the `--utd 5` flag is a one-character change and roughly halves training step cost.
+
+### 24.5 Lessons
+
+- **Profile before optimizing.** The Polyak update being 10% of wallclock was invisible until cProfile ran. I would have guessed it was MuJoCo physics or the obs construction.
+- **Cache `nn.Module.parameters()` lists** anywhere they're walked more than a few times per second. PyTorch's generator-based traversal is the implicit cost of every optimizer step and Polyak update.
+- **Bypass framework observable pipelines** (robosuite's `_update_observables`) when the consumer reads `sim.data` directly anyway. Frameworks pay for genericity.
+- **Choose the right granularity of helper**. The triple-copy `_find_underlying` was a sign the abstraction was missing — a 50-LOC `_wrapper_utils.py` with two functions deletes 75 LOC of duplication.
+- **Don't add parallelism preemptively.** With UTD=10, parallel CPU envs barely help. Plan an MJX rewrite (v2) for the *qualitative* speedup; don't waste effort on a 1.2× SubprocVecEnv layer that won't survive the rewrite anyway.
