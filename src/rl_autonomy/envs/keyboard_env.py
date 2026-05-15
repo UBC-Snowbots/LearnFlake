@@ -262,17 +262,14 @@ class KeyboardEnv(ManipulationEnv):
         self._arm_qpos_idx = np.asarray(robot._ref_joint_pos_indexes, dtype=np.int64)
         self._arm_qvel_idx = np.asarray(robot._ref_joint_vel_indexes, dtype=np.int64)
 
-        # EEF body id for direct quat read (robosuite stores site orientation
-        # only as a 3x3 matrix; the *body* the site attaches to has a quat).
-        # Falls back to the legacy quat-from-site_xmat path if the body lookup
-        # fails (kept robust because some custom models use orphan sites).
-        try:
-            eef_body_name = sim.model.body_id2name(
-                sim.model.site_bodyid[self._eef_site_id]
-            )
-            self._eef_body_id = sim.model.body_name2id(eef_body_name)
-        except Exception:
-            self._eef_body_id = None
+        # Note: we read EEF orientation from site_xmat (and convert to quat
+        # via robosuite's transform_utils.mat2quat) instead of body_xquat.
+        # body_xquat would be a hair faster but it ignores any rotation
+        # offset the site has w.r.t. its parent body, which silently breaks
+        # if the MJCF ever adds an <euler> to the eef site. The site_xmat
+        # path is universally correct.
+        import robosuite.utils.transform_utils as _T  # noqa: F401
+        self._mat2quat = _T.mat2quat
 
         # For checking collisions with the keyboard surface
         self._keyboard_geom_ids: set[int] = {
@@ -424,21 +421,15 @@ class KeyboardEnv(ManipulationEnv):
     def _eef_and_target(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Direct sim.data reads — skip the observable pipeline entirely.
 
-        sim.step() already calls mj_forward, so site_xpos / body_xquat are
+        sim.step() already calls mj_forward, so site_xpos / site_xmat are
         current. Going through self._get_observations(force_update=False)
         is functionally equivalent but adds robosuite's per-observable
         bookkeeping cost on each call. Profile showed this mattered.
         """
         sim = self.sim
         eef_pos = sim.data.site_xpos[self._eef_site_id]
-        if self._eef_body_id is not None:
-            eef_quat = sim.data.body_xquat[self._eef_body_id]
-        else:
-            # Last-resort: derive quat from site_xmat
-            import robosuite.utils.transform_utils as T
-            eef_quat = T.mat2quat(sim.data.site_xmat[self._eef_site_id].reshape(3, 3))
+        eef_quat = self._mat2quat(sim.data.site_xmat[self._eef_site_id].reshape(3, 3))
         key_pos = sim.data.body_xpos[self._key_body_ids[self._target_key]]
-        # Return non-copying views; consumers shouldn't mutate.
         return eef_pos, eef_quat, key_pos
 
     def _in_contact(self) -> bool:
@@ -496,11 +487,7 @@ class KeyboardEnv(ManipulationEnv):
         joint_pos = d.qpos[self._arm_qpos_idx].astype(np.float32, copy=False)
         joint_vel = d.qvel[self._arm_qvel_idx].astype(np.float32, copy=False)
         eef_pos = d.site_xpos[self._eef_site_id].astype(np.float32, copy=False)
-        if self._eef_body_id is not None:
-            eef_quat = d.body_xquat[self._eef_body_id].astype(np.float32, copy=False)
-        else:
-            import robosuite.utils.transform_utils as T
-            eef_quat = T.mat2quat(d.site_xmat[self._eef_site_id].reshape(3, 3)).astype(np.float32)
+        eef_quat = self._mat2quat(d.site_xmat[self._eef_site_id].reshape(3, 3)).astype(np.float32)
 
         actuator_pos = float(d.qpos[self._actuator_qpos_addr])
         actuator_vel = float(d.qvel[self._actuator_qvel_addr])

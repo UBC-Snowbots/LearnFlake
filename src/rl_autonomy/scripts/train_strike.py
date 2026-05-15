@@ -25,6 +25,7 @@ import torch
 
 from rl_autonomy.algos import RLPDSAC, RLPDConfig
 from rl_autonomy.envs import make_env
+from rl_autonomy.scripts.train_approach import _share_normalizer
 
 
 def main() -> int:
@@ -58,6 +59,10 @@ def main() -> int:
                          domain_rand=False, seed=args.seed)
     eval_env = make_env(mode="strike", frame_stack=args.frame_stack,
                         domain_rand=False, seed=args.seed + 1)
+
+    # Share train env's RunningMeanStd with eval env so the eval policy sees
+    # the same normalization (same fix as train_approach, see TRACKER §23.4).
+    _share_normalizer(train_env, eval_env)
 
     cfg = RLPDConfig(
         update_to_data=args.utd,
