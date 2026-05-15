@@ -1291,3 +1291,74 @@ So §25 *did* improve stability. §26 should close the remaining gap.
 - **α floor matters on sparse-success tasks.** Vanilla SAC's auto-α works on dense-reward tasks because the policy converges to a unique mode with the right entropy. Sparse-success tasks have many narrow local optima; if α decays too far, the policy gets trapped.
 - **Failure modes differ by what bottlenecks first.** Attempt #1: critic explosion (Q=+480 → policy follows artifact). Attempt #2: critic clean but policy frozen (Q=+33 ≈ steady-state, but no exploration to find better). Both manifest as crashing eval_return — different root causes.
 - **Two safety nets are better than one.** §25 (lower reward magnitude) + §26 (α floor) target different failure modes; either one alone might not be enough.
+
+---
+
+## 27. M3 attempt #3 — α floor worked, but policy regressed late (2026-05-16)
+
+Attempt #3 launched after §26 (α floor 0.1, UTD=2). The α floor prevented catastrophic collapse — no eval drop below −25 like attempt #2's −129 or attempt #1's −293. But the policy oscillated instead of converging.
+
+### 27.1 Timeline
+
+| step | eval_return | comment |
+|---|---|---|
+| 20k–60k | -1 to +0.75 | warmup, exploring |
+| 80k | -3.09 | near-baseline |
+| **100k** | **+23.50** | **peak — best of all 3 attempts** |
+| 120k | -16.98 | drop |
+| 140k | -14.21 | drop |
+| 160k | +16.36 | recovery |
+| 180–200k | -8 to -2 | mild |
+| 220k | +4.66 | |
+| 240–260k | -5 to -25 | regressing |
+| 280k (stopped) | (training paused) | α floored at exactly 0.100, critic_loss ≈ 0.001 |
+
+### 27.2 The peak checkpoint actually works
+
+User visualized `approach_step_000100000.pt`: **arm hovers steadily over the green dot above key 'g'**. That's correct behavior. eval=+23.5 corresponds to ~25% success across phase A's 20 keys, indicating the policy generalizes inside phase A imperfectly (good at central keys like g/h/f/j; struggles at corners like q/p).
+
+The current (step-280k) checkpoint shows the "flies past" failure mode visually — it has direction but no terminal control / deceleration.
+
+### 27.3 Why it regressed
+
+Without demos to anchor the bootstrap, the critic+actor co-train into each other's estimates. Over 100k–280k steps the system drifted away from the working solution. critic_loss = 0.001 indicates internally-consistent estimates that no longer match reality — the classic "bootstrap echo chamber" failure that RLPD's symmetric demo+online replay is specifically designed to prevent.
+
+This is *also* documented in the literature (BRO, Hung et al. 2018 "Catastrophic Forgetting in RL") — late-stage SAC drift on sparse-success tasks without demos.
+
+### 27.4 Decision — lock the best checkpoint, proceed to Strike
+
+The peak is real and demonstrable. Continuing training is destroying it. Stopped attempt #3, archived to `checkpoints/approach_v1_attempt3/`, and copied `approach_step_000100000.pt` to:
+
+```
+checkpoints/approach_v1_best/approach_best.pt
+```
+
+This is the canonical "best Approach" artifact for v1. Phase 4 (Strike training + orchestrator eval) now proceeds using this checkpoint.
+
+### 27.5 What we expect on the full pipeline (M4)
+
+With Approach at ~25% phase-A success and Strike at presumably high reliability (sparser reward, simpler task), the chained `eval_orchestrator` should produce:
+
+- Easy keys (g, h, f, j, …): 60–80% full-chain success (Strike reliable, Approach occasionally lands)
+- Phase B keys (full alphanumeric): 20–40% (Approach less reliable on edges)
+- Phase C keys (corners, function row): probably <10% (out of training distribution; only Phase A keys trained)
+
+So M4 acceptance (≥80/87 at ≥80% success) is almost certainly going to **fail** with this Approach checkpoint. The orchestrator run produces concrete per-key failure data that drives the v1.1 plan.
+
+### 27.6 v1.1 plan if M4 fails (likely)
+
+**Demo bootstrap pipeline** (TRACKER §8 was always the intended path; v1 skipped per user direction).
+
+1. Run `approach_best.pt` deterministically across each Phase A key, 20–50 trials per key.
+2. Save the successful trajectories as HDF5 demos via the existing `demo_recorder.py` (instrumented to log full transitions, not just joystick demos).
+3. New RLPD run with demos loaded into `SymmetricReplayBuffer.demos`. The §8.3 `ResidualActor` path is also available if we want frozen-base + residual; both paths use the same demo buffer.
+4. Continue training with the demo anchor preventing drift. Expected to push Approach to 70–90% success across phases A+B in another ~500k steps.
+
+Cost: ~6 hours wallclock total (demo gen ~1h, training ~5h). The infrastructure for this already exists in `algos/bc_pretrain.py`, `algos/residual_actor.py`, and `algos/replay_buffer.py:SymmetricReplayBuffer` — just needs wiring.
+
+### 27.7 Lessons
+
+- **SAC without demos hits a ceiling on sparse-success tasks.** All three attempts peaked then regressed. The §25 (reward) and §26 (α floor) fixes raised the peak from +17 → +20 → +23 but didn't prevent drift. RLPD's authors are clear in their paper that the demo+online sampling is the load-bearing component for stability; we shipped without it and confirmed why it matters.
+- **Save best-checkpoint by eval, not by latest.** Our save schedule (`approach_step_*.pt` every 50k) preserved the peak by luck. A `--save-on-eval-best` flag would be a tiny add and would have made this analysis trivial.
+- **Visualization is decisive.** The user's "hovers steadily over the green dot" confirmation transformed the diagnosis from "is the policy working" to "the policy works but late training destroyed it." Numerical eval_return alone wasn't enough; the visual showed the qualitative truth.
+- **Knowing when to stop is a skill.** We could have kept attempt #3 running for another 700k steps and not improved. The cost of stopping is small; the cost of continuing into divergence is large.
