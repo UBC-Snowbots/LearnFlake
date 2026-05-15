@@ -9,11 +9,17 @@ warnings.filterwarnings("ignore")
 
 
 def test_approach_reward_bounds_static_claim():
-    """Per-step bounds after the §23 reward fix: total ∈ ~[-2.05, 200.95]."""
+    """Per-step bounds after §25 collapse fix: total ∈ ~[-1.025, 100.475].
+
+    History:
+      §5.2 initial: [-0.2, 2.0]  (hover beat success, fixed §23)
+      §23 fix:     [-2.05, 200.95]  (success now dominates, but critic overestimated)
+      §25 fix:     [-1.025, 100.475]  (halved everything; narrower critic target)
+    """
     from rl_autonomy.envs.rewards import approach_reward_bounds
     lo, hi = approach_reward_bounds()
-    assert lo == pytest.approx(-2.05)
-    assert hi == pytest.approx(200.95)
+    assert lo == pytest.approx(-1.025)
+    assert hi == pytest.approx(100.475)
 
 
 def test_approach_reward_within_bounds_on_random_inputs():
@@ -35,10 +41,19 @@ def test_approach_reward_within_bounds_on_random_inputs():
 
 
 def test_approach_reward_perfect_state():
-    from rl_autonomy.envs.rewards import approach_reward, APPROACH_W_TIME, APPROACH_W_SUCCESS
+    from rl_autonomy.envs.rewards import (
+        approach_reward, APPROACH_W_TIME, APPROACH_W_SUCCESS,
+        APPROACH_W_XY, APPROACH_W_Z, APPROACH_W_TILT, APPROACH_W_SMOOTH,
+    )
     c = approach_reward(0.0, 0.0, 0.0, 0.0, success=True, collision=False)
-    # all dense = 1.0 (sums to 1.0) + success bonus + per-step time penalty
-    assert c.total == pytest.approx(APPROACH_W_SUCCESS + 1.0 + APPROACH_W_TIME)
+    # all dense terms = 1.0 (each tolerance() returns 1 inside its bound),
+    # weighted by their W_* coefficients, plus success bonus, plus per-step
+    # time penalty. Computed symbolically so the test survives future
+    # reward re-tuning without lying.
+    dense_sum = (
+        APPROACH_W_XY + APPROACH_W_Z + APPROACH_W_TILT + APPROACH_W_SMOOTH
+    )
+    assert c.total == pytest.approx(APPROACH_W_SUCCESS + dense_sum + APPROACH_W_TIME)
     assert c.r_success == APPROACH_W_SUCCESS
     assert c.r_collision == 0.0
 

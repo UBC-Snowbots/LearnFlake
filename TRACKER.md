@@ -1145,3 +1145,84 @@ That fits the overnight budget without parallelism. If the user wants 2× turnar
 - **Bypass framework observable pipelines** (robosuite's `_update_observables`) when the consumer reads `sim.data` directly anyway. Frameworks pay for genericity.
 - **Choose the right granularity of helper**. The triple-copy `_find_underlying` was a sign the abstraction was missing — a 50-LOC `_wrapper_utils.py` with two functions deletes 75 LOC of duplication.
 - **Don't add parallelism preemptively.** With UTD=10, parallel CPU envs barely help. Plan an MJX rewrite (v2) for the *qualitative* speedup; don't waste effort on a 1.2× SubprocVecEnv layer that won't survive the rewrite anyway.
+
+---
+
+## 25. M3 attempt #1 collapse + restart with safer reward + lower UTD (2026-05-15)
+
+First production M3 run (commit c776634, 1 M target steps, UTD=10, `--domain-rand`, reward weights from §23) collapsed at step ~200k. Stopped and restarted with §25 fixes after 1h 37m of training.
+
+### 25.1 Timeline
+
+| step | wallclock | eval_return | training ep_return | critic_loss | α | event |
+|---|---|---|---|---|---|---|
+| 5k  | 0:03 | — | -8 | nan→0.02 | 1.0 | warmstart ends |
+| 20k | 0:08 | — | -8 | 0.01 | 0.50 | first updates |
+| 40k | 0:21 | **+17.46** | -6 | 0.05 | 0.10 | policy starts succeeding |
+| 60k | 0:30 | **-293.03** | -6 | rising | 0.13 | **first collapse** |
+| 100k | 0:48 | -6.79 | -6 | 30 | 0.26 | partial recovery, α auto-tuner raised it |
+| 120k | 0:54 | **+11.24** | -6.7 | 43 | 0.23 | recovery continued |
+| 200k | 1:37 | **-118.77** | -6.6 | **326** | 0.39 | **second collapse, deeper** |
+
+### 25.2 Diagnosis — classic SAC Q-overestimation cascade
+
+The reward landscape post §23 was:
+
+- Most steps: dense ~0.5–0.99 (close-but-not-quite) plus time penalty −0.05
+- Success step: dense + **+200 sparse bonus** + episode termination
+- Failure: similar dense without the bonus
+
+That's a **220-unit jump** at success boundaries. With UTD=10 (10 critic updates per env step), the critic aggressively chases each new success. But:
+
+1. **No demos** → Q targets are purely bootstrapped, no anchor to real successful returns.
+2. **High UTD** → Each successful transition gets fit 10× before the next env step. Q estimates can run away.
+3. **Twin-critic min** → Helps against overestimation but isn't a hard cap.
+4. **LayerNorm** → Per §21 it's critical for stability; here it kept the critic from exploding into NaN but couldn't prevent slow drift.
+
+Empirical evidence the loop occurred: at step 213k, `actor_loss = α·log_prob − Q = −481` with α=0.39, log_prob ≈ −3 → Q ≈ +480. But the maximum achievable return is ~220. The critic was overestimating by **2×**, and the actor was happily following that gradient into nothing.
+
+The recovery between collapse 1 (60k) and the +11 reading at 120k was the α auto-tuner: as the policy collapsed onto an artifact, its entropy crashed, which raised α, which re-injected exploration noise, which un-stuck the policy. But the underlying critic overestimation was never resolved, and a second cascade hit at ~200k.
+
+### 25.3 Fix — three knobs turned down simultaneously
+
+| Knob | Before (§23) | After (§25) | Rationale |
+|---|---|---|---|
+| `APPROACH_W_XY/Z/TILT/SMOOTH` | 0.5/0.3/0.15/0.05 (sum 1.0) | 0.25/0.15/0.075/0.025 (sum 0.5) | Halve per-step dense reward → halves the critic's per-step target magnitude. Success-vs-hover gap stays positive: ~123 vs ~95 ≈ 28-point margin (was 245 vs 188 ≈ 57). Smaller margin but the gradient direction is unchanged. |
+| `APPROACH_W_SUCCESS` | 200.0 | **100.0** | Halve the discontinuity at success boundaries → critic has to fit a 100-unit jump instead of 200-unit. Less Q-overestimation pressure. |
+| `APPROACH_W_COLLISION` | -2.0 | **-1.0** | Halved to match. |
+| `APPROACH_W_TIME` | -0.05 | **-0.025** | Halved to match. |
+| `--utd` default | 10 | **5** | Five critic gradient updates per env step instead of 10. RLPD paper says UTD=10 is optimal *with demos*; without demos it's the wrong setting on a sparse-success task. UTD=5 is the documented compromise. |
+
+Math check on the new reward:
+- Hover at edge: 200 × 0.495 dense − 5 (time) = **94**
+- Success at step 50: 50 × 0.475 dense + 100 bonus − 1.25 (time) = **122.5**
+- **Margin: +28.5 in favor of success.** Still positive.
+
+Per-step bounds: [-1.025, 100.475]. About half the §23 range. Critic has a narrower target distribution to fit.
+
+### 25.4 Implementation
+
+- `src/rl_autonomy/envs/rewards.py` — weights halved.
+- `src/rl_autonomy/scripts/train_approach.py` — `--utd` default 10 → 5 with comment pointing here.
+- `tests/test_reward_bounds.py` — bounds + perfect-state references updated; perfect-state test now references the constants symbolically so future re-tuning doesn't require re-editing.
+- The §22.5 sanity test (`test_approach_reward_success_dominates_dense_episode`) re-runs with the new constants; **still passes** — success @ step 50 = 122 > hover episode = 94.
+
+### 25.5 What's preserved
+
+- §23's success-dominates-hover invariant (still passes the regression test).
+- The §21 fixed-LayerNorm post-LN order (algorithm-level, unchanged).
+- The §24 perf optimizations (cached params, direct sim.data reads).
+- The §23.4 train/eval normalizer sharing fix.
+
+### 25.6 What got archived (not deleted)
+
+- `checkpoints/approach_v1_attempt1/` — 5 checkpoints from the failed run.
+- `logs/approach_v1_attempt1/` — full training log + TB events.
+
+Useful later for ablation: train a v2 with the §25 reward and compare wallclock-to-first-success against the v1 attempt #1 log to validate that the fix sped up convergence rather than just preventing collapse.
+
+### 25.7 Lessons
+
+- **High UTD without demos is a known failure mode for sparse-success tasks.** RLPD's paper is specifically about leveraging prior data; the high UTD value depends on the demo anchor. We knew this (TRACKER §3.1 mentions "from scratch or with demos") but I shipped UTD=10 default anyway. Should have been UTD=5 from the start.
+- **Watch eval_return curves like a hawk during the first 200k steps.** Training return is dominated by the time penalty; eval is the only signal that says whether the policy is actually learning the task. The −293 → +11 → −118 trajectory is a textbook "policy on the edge" pattern.
+- **Halving reward weights is a cheap intervention before reaching for demos or HRL.** The reward landscape's *shape* mattered more than the *gradient direction*. We didn't need to change the policy, the algorithm, or the architecture — just the scalar in front of `success`.

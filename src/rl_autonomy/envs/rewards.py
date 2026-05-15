@@ -39,28 +39,32 @@ APPROACH_Z_MARGIN = 0.04             # 4 cm
 APPROACH_TILT_MARGIN = 0.30          # ~17°
 APPROACH_SMOOTH_MARGIN = 0.5
 
-# Component weights — sum approximately to 1.0 so the dense reward stays in [0,1].
-APPROACH_W_XY = 0.5
-APPROACH_W_Z = 0.3
-APPROACH_W_TILT = 0.15
-APPROACH_W_SMOOTH = 0.05
+# Component weights — sum approximately to 0.5 so the dense reward per step
+# stays in [0, 0.5]. Halved from the original 1.0 sum (commit 9550935 → c1fb555)
+# after the §25 collapse: with max dense = 1.0 the critic had to fit a 220-unit
+# jump at success boundaries, which destabilized Q estimates under UTD=10.
+# Halving the dense reward gives the critic a narrower target distribution
+# (success-vs-hover gap reduced from ~220 to ~120) while preserving the
+# gradient direction.
+APPROACH_W_XY = 0.25
+APPROACH_W_Z = 0.15
+APPROACH_W_TILT = 0.075
+APPROACH_W_SMOOTH = 0.025
 
 # Sparse / penalty weights — applied on top of dense shaping.
 #
 # IMPORTANT: success bonus must dominate the per-episode dense-reward sum.
-# Episode horizon = 200; max dense per step ≈ 1.0; an agent hovering near
-# the goal can accumulate ~190 reward without ever triggering success and
-# ending the episode. Success bonus = 100 plus a per-step time penalty
-# makes "drive to goal, trigger success, end episode" strictly higher
-# value than "hover indefinitely".
+# Episode horizon = 200; max dense per step ≈ 0.5; so hover episode caps at
+# ~100. Success bonus = 100 plus a per-step time penalty (-5/episode) makes
+# the success policy strictly dominate hover: ~123 vs ~95 = 28-point margin.
 #
-# Original v1 values were 1.0 / -0.2 with no time penalty — that produced
-# a hovering optimum (training return plateaued at ~180 with 0% success).
-# Fixed 2026-04-29 mid-training. See TRACKER §23.
-APPROACH_W_SUCCESS = 200.0          # higher than originally proposed; needs to beat
-                                    # 200·max_dense (≈198) so hover < success.
-APPROACH_W_COLLISION = -2.0
-APPROACH_W_TIME = -0.05            # per-step penalty; -10 over a 200-step horizon
+# History: original v1 had 1.0 / -0.2 / no time penalty (hover beat success
+# by 7×, §23). Bumped to 200 / -2 / -0.05 in §23. That fixed the hover
+# optimum but the 220-unit critic target jump caused Q-overestimation
+# cascades under UTD=10 (§25). Halved everything 2026-05-15.
+APPROACH_W_SUCCESS = 100.0
+APPROACH_W_COLLISION = -1.0
+APPROACH_W_TIME = -0.025          # per-step penalty; -5 over a 200-step horizon
 
 
 @dataclass
