@@ -42,16 +42,8 @@ def _build_agent(env, ckpt_path: str, device: str | None) -> RLPDSAC:
 
 def _find_keyboard_env(env) -> KeyboardEnv:
     """Walk the wrapper stack to the inner robosuite-native KeyboardEnv."""
-    cur = env
-    while True:
-        if isinstance(cur, KeyboardEnv):
-            return cur
-        if hasattr(cur, "underlying") and isinstance(cur.underlying, KeyboardEnv):
-            return cur.underlying
-        if hasattr(cur, "env"):
-            cur = cur.env
-            continue
-        raise RuntimeError("could not find KeyboardEnv in wrapper stack")
+    from rl_autonomy.envs._wrapper_utils import require_inner
+    return require_inner(env, KeyboardEnv)
 
 
 def _approach_episode(

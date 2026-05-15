@@ -13,12 +13,15 @@ the asymmetric critic can be conditioned on them (TRACKER §9.2 #4).
 """
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, asdict
 from typing import Any
 
 import numpy as np
 
 import gymnasium as gym
+
+from ._wrapper_utils import find_inner
 
 
 @dataclass
@@ -102,8 +105,9 @@ class DomainRandWrapper(gym.Wrapper):
         self._nominal_dof_damping: np.ndarray | None = None
         self._nominal_body_mass: np.ndarray | None = None
 
-        # Per-step latency buffer for action_latency_tau.
-        self._action_buf: list[np.ndarray] = []
+        # Per-step latency buffer for action_latency_tau. Using deque so the
+        # popleft is O(1); a Python list's pop(0) is O(n).
+        self._action_buf: deque[np.ndarray] = deque()
         self._lag_steps = 0  # derived from tau and control_freq
 
     # ---- gym API ----
@@ -116,7 +120,10 @@ class DomainRandWrapper(gym.Wrapper):
         # Apply the keyboard-position part *before* env.reset() so the env
         # picks up the new offset when it builds the model. The robosuite env
         # rebuilds on hard_reset=True.
-        underlying = self._find_underlying()
+        from .keyboard_env import KeyboardEnv  # late import to avoid cycle
+        underlying = find_inner(self.env, KeyboardEnv)
+        if underlying is None:
+            raise RuntimeError("DomainRandWrapper requires KeyboardEnv inside the stack")
         underlying.keyboard_offset = np.array([
             -0.15 + self._sample.keyboard_dx,
             0.0 + self._sample.keyboard_dy,
@@ -124,21 +131,22 @@ class DomainRandWrapper(gym.Wrapper):
         underlying.keyboard_height = 0.15 + self._sample.keyboard_dz
         result = self.env.reset(**kwargs)
         # Now that the sim exists, apply physics randomizations.
-        self._apply_post_reset_dr()
+        self._apply_post_reset_dr(underlying)
         # Reset action lag buffer
-        control_freq = getattr(underlying, "control_freq", 20)
-        self._lag_steps = int(round(self._sample.action_latency_tau * control_freq))
-        self._action_buf = []
+        self._lag_steps = int(round(self._sample.action_latency_tau * underlying.control_freq))
+        self._action_buf.clear()
         return result
 
     def step(self, action):
-        # Action-latency model: first-order discrete delay
+        # Action-latency model: first-order discrete delay. Hold the most
+        # recent commanded action until the buffer fills (better than zero
+        # which would actively brake the arm).
         if self._lag_steps > 0:
-            self._action_buf.append(np.asarray(action, dtype=np.float32))
+            action = np.asarray(action, dtype=np.float32)
+            self._action_buf.append(action)
             if len(self._action_buf) > self._lag_steps:
-                action = self._action_buf.pop(0)
-            else:
-                action = np.zeros_like(self._action_buf[0])
+                action = self._action_buf.popleft()
+            # else: buffer still filling; pass through the current action
         obs, reward, terminated, truncated, info = self.env.step(action)
         info = dict(info)
         info["dr"] = asdict(self._sample)
@@ -146,21 +154,9 @@ class DomainRandWrapper(gym.Wrapper):
 
     # ---- internals ----
 
-    def _find_underlying(self):
-        """Walk wrapper stack to the inner KeyboardEnv (robosuite native)."""
-        env = self.env
-        while hasattr(env, "env"):
-            if hasattr(env, "underlying"):
-                return env.underlying
-            env = env.env
-        if hasattr(env, "underlying"):
-            return env.underlying
-        return env  # last resort
-
-    def _apply_post_reset_dr(self):
+    def _apply_post_reset_dr(self, underlying):
         if not self.enabled:
             return
-        underlying = self._find_underlying()
         sim = getattr(underlying, "sim", None)
         if sim is None:
             return

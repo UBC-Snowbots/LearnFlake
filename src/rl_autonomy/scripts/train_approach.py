@@ -71,31 +71,17 @@ class CurriculumEnv(gym.Wrapper):
         return obs, reward, terminated, truncated, info
 
     def _find_underlying(self):
-        env = self.env
-        while hasattr(env, "env"):
-            if hasattr(env, "underlying"):
-                return env.underlying
-            env = env.env
-        return getattr(env, "underlying", env)
-
-
-def _find_obs_adapter(env):
-    """Walk the wrapper stack to find the ObsAdapter (which holds the RMS)."""
-    from rl_autonomy.envs.obs_adapter import ObsAdapter
-    cur = env
-    while True:
-        if isinstance(cur, ObsAdapter):
-            return cur
-        if hasattr(cur, "env"):
-            cur = cur.env
-            continue
-        return None
+        from rl_autonomy.envs import KeyboardEnv
+        from rl_autonomy.envs._wrapper_utils import find_inner
+        return find_inner(self.env, KeyboardEnv)
 
 
 def _share_normalizer(train_env, eval_env) -> None:
     """Point the eval env's ObsAdapter at the train env's RMS, and freeze it."""
-    train_oa = _find_obs_adapter(train_env)
-    eval_oa = _find_obs_adapter(eval_env)
+    from rl_autonomy.envs._wrapper_utils import find_inner
+    from rl_autonomy.envs.obs_adapter import ObsAdapter
+    train_oa = find_inner(train_env, ObsAdapter)
+    eval_oa = find_inner(eval_env, ObsAdapter)
     if train_oa is None or eval_oa is None:
         print("[approach] warning: ObsAdapter not found in one of the envs; skipping RMS share")
         return
