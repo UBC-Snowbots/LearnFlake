@@ -48,6 +48,10 @@ class RLPDConfig:
     # Entropy
     target_entropy_scale: float = 0.5      # target_entropy = -scale * dim(action)
     init_temperature: float = 1.0
+    min_alpha: float = 0.1                 # floor on the auto-tuned α; prevents
+                                           # exploration collapse on sparse-success
+                                           # tasks without demos (TRACKER §26).
+                                           # Set to 0 to disable (vanilla SAC behavior).
 
     # Optimizer
     actor_lr: float = 3e-4
@@ -276,6 +280,16 @@ class RLPDSAC:
         self.temp_opt.zero_grad(set_to_none=True)
         temp_loss.backward()
         self.temp_opt.step()
+
+        # Floor log_alpha. Without this, the auto-tuner can drive α to ~0.03
+        # on sparse-success tasks (target_entropy met by a near-deterministic
+        # policy), killing exploration. Once exploration dies the policy can't
+        # escape local minima — observed in §26 collapse. Setting min_alpha=0.1
+        # is a soft floor that preserves the auto-tune dynamics while
+        # preventing total exploration collapse. min_alpha=0 = vanilla SAC.
+        if self.cfg.min_alpha > 0:
+            with torch.no_grad():
+                self.log_alpha.clamp_(min=float(np.log(self.cfg.min_alpha)))
 
         return {
             "actor_loss": float(actor_loss.detach()),

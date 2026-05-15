@@ -1226,3 +1226,68 @@ Useful later for ablation: train a v2 with the §25 reward and compare wallclock
 - **High UTD without demos is a known failure mode for sparse-success tasks.** RLPD's paper is specifically about leveraging prior data; the high UTD value depends on the demo anchor. We knew this (TRACKER §3.1 mentions "from scratch or with demos") but I shipped UTD=10 default anyway. Should have been UTD=5 from the start.
 - **Watch eval_return curves like a hawk during the first 200k steps.** Training return is dominated by the time penalty; eval is the only signal that says whether the policy is actually learning the task. The −293 → +11 → −118 trajectory is a textbook "policy on the edge" pattern.
 - **Halving reward weights is a cheap intervention before reaching for demos or HRL.** The reward landscape's *shape* mattered more than the *gradient direction*. We didn't need to change the policy, the algorithm, or the architecture — just the scalar in front of `success`.
+
+---
+
+## 26. M3 attempt #2 — α decayed too far → exploration collapse (2026-05-15)
+
+Attempt #2 launched immediately after §25 (halved weights, UTD=5). Failed differently from attempt #1.
+
+### 26.1 Timeline
+
+| step | eval_return | training ep_return | critic_loss | α | comment |
+|---|---|---|---|---|---|
+| 20k | -50.9 | -3.2 | nan→? | ? | warmup ending |
+| 40k | **+11.83** | ~-3 | low | ? | found success |
+| 60k | -10.95 | -3 | low | ? | brief dip |
+| 80k | **+20.03** | -3 | low | ? | peak |
+| 100k | +5.44 | -3 | low | ? | oscillating |
+| 120k | +9.85 | -3 | low | ? | oscillating |
+| 140k | +8.22 | -3 | low | ? | oscillating |
+| 160k | **−129.16** | -3 | low | ? | **sudden collapse** |
+| 180k | -76.55 | -2.5 | 0.97 | **0.029** | not recovering |
+| 186k | (snap) | -2.42 | 0.97 | 0.029 | Q≈+33, eval=-76 |
+
+The critic was clean (loss < 1.0). Q estimate +33 vs actual eval -76 = 109-unit overestimate, but the failure mode wasn't a critic explosion. It was **α collapsed to 0.029** — the policy is essentially deterministic. With no exploration noise it can't escape the bad attractor it slid into at step 160k.
+
+### 26.2 Diagnosis — auto-α undershoot on sparse-success
+
+The temperature controller optimizes `J(α) = α · (H − H_target)`. As the policy converges and entropy decreases, α drops to keep the entropy bonus small. But if the policy converges to a near-deterministic mode and meets its target entropy via narrowness, the auto-tuner lets α drop arbitrarily low. **Once α is below ~0.05, the policy effectively cannot explore**, and any error in the critic's Q estimate becomes a trap: the actor follows the gradient and never deviates enough to discover the gradient was wrong.
+
+This is the "α auto-decay" failure mode. It's documented in the literature (BRO paper specifically calls it out, recommending an α floor) but isn't in the vanilla SAC recipe.
+
+§25 fixes — halved reward weights, lower UTD — reduced the *magnitude* of critic overestimation but didn't address the *exploration collapse*. Attempt #2 had a clean critic but a frozen policy.
+
+### 26.3 Fix — α floor + UTD 5→2
+
+| Knob | Before (§25) | After (§26) | Rationale |
+|---|---|---|---|
+| `RLPDConfig.min_alpha` | (absent — α unbounded below) | **0.1** | Clamp `log_alpha ≥ log(0.1)` after every temperature update. Preserves auto-α dynamics above the floor; below 0.1 it's pinned. Matches BRO paper's recommended exploration floor. |
+| `--utd` default | 5 | **2** | Even lower than §25. With no demos, even 5 critic updates per env step is too aggressive on this sparse-success reward. 2 is close to vanilla SAC (UTD=1); a small UTD buffer for the wider critic. |
+
+`min_alpha = 0` disables the floor (vanilla SAC behavior); the default 0.1 is a soft constraint that only matters once the auto-tuner would have driven α below it.
+
+### 26.4 Implementation
+
+- `src/rl_autonomy/algos/rlpd_sac.py` — new `RLPDConfig.min_alpha`. After `temp_opt.step()`, clamp `log_alpha` to `≥ log(min_alpha)` if `min_alpha > 0`.
+- `src/rl_autonomy/scripts/train_approach.py` — `--utd` default 5 → 2 with comment.
+- `tests/test_rlpd_sac.py` — two new tests:
+  - `test_min_alpha_floor_enforced`: drive the auto-tuner toward zero (large `target_entropy_scale`, high `temp_lr`); confirm α never crosses below `min_alpha` over 50 train steps.
+  - `test_min_alpha_zero_disables_floor`: sanity-check the `min_alpha=0` branch.
+- **M2 regression**: RLPD-SAC still reaches -97 on Pendulum-v1 (target -150). The floor doesn't hurt easy tasks.
+
+### 26.5 What's preserved
+
+Everything from §23, §25, §21 (LayerNorm placement), §24 (perf optimizations), §23.4 (shared RMS).
+
+### 26.6 Where attempt #2 actually got to
+
+Better than attempt #1: the run found success at +20 (eval @ 80k) and stayed positive for ~100k steps before collapsing. Attempt #1 had +17 once at step 40k then never recovered cleanly.
+
+So §25 *did* improve stability. §26 should close the remaining gap.
+
+### 26.7 Lessons
+
+- **α floor matters on sparse-success tasks.** Vanilla SAC's auto-α works on dense-reward tasks because the policy converges to a unique mode with the right entropy. Sparse-success tasks have many narrow local optima; if α decays too far, the policy gets trapped.
+- **Failure modes differ by what bottlenecks first.** Attempt #1: critic explosion (Q=+480 → policy follows artifact). Attempt #2: critic clean but policy frozen (Q=+33 ≈ steady-state, but no exploration to find better). Both manifest as crashing eval_return — different root causes.
+- **Two safety nets are better than one.** §25 (lower reward magnitude) + §26 (α floor) target different failure modes; either one alone might not be enough.

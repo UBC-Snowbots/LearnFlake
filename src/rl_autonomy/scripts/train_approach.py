@@ -132,10 +132,11 @@ def main() -> int:
     p.add_argument("--frame-stack", type=int, default=3)
     p.add_argument("--domain-rand", action="store_true",
                    help="enable domain randomization (default off; turn on in Phase 4)")
-    p.add_argument("--utd", type=int, default=5,
-                   help=("update-to-data ratio. 5 = v1 default after §25 collapse "
-                         "post-mortem; 10 = RLPD paper default but unstable on this "
-                         "task without demos; 1 = vanilla SAC."))
+    p.add_argument("--utd", type=int, default=2,
+                   help=("update-to-data ratio. 2 = v1 default after §26 (collapse "
+                         "from α-decay despite §25 reward fix). 5 = §25 default. "
+                         "10 = RLPD paper default but unstable on this task without "
+                         "demos. 1 = vanilla SAC."))
     p.add_argument("--warmstart", type=int, default=5_000)
     p.add_argument("--save-every", type=int, default=50_000,
                    help="save checkpoint every N env steps")
