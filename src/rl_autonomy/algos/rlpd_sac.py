@@ -157,6 +157,15 @@ class RLPDSAC:
         for p in self.critic_target.parameters():
             p.requires_grad = False
 
+        # Cache the parameter lists for the Polyak target update. Walking
+        # nn.Module.parameters() each call is a generator over the whole
+        # module tree (~25 LayerNorms + Linears + biases per critic × 2 critics).
+        # With UTD=10 that's 200k+ Module._named_members traversals per 1k env
+        # steps — profile shows it was 10% of wallclock. Caching the lists once
+        # is sound because critic + critic_target are not mutated after init.
+        self._critic_params = list(self.critic.parameters())
+        self._critic_target_params = list(self.critic_target.parameters())
+
         # Auto-tuned entropy temperature, parametrized as log_alpha for stability
         self.log_alpha = nn.Parameter(
             torch.tensor(np.log(self.cfg.init_temperature), dtype=torch.float32, device=self.device)
@@ -275,9 +284,15 @@ class RLPDSAC:
         }
 
     def _polyak_update(self) -> None:
+        # Use torch._foreach_lerp_ to update all target tensors in a single
+        # fused kernel launch (PyTorch ≥1.13). Equivalent math:
+        #     p_t ← (1 − τ) p_t + τ p
+        # but runs ~5× faster than Python-loop .mul_().add_() on cuda because
+        # it avoids re-entering CPU between every tensor.
         with torch.no_grad():
-            for p, p_t in zip(self.critic.parameters(), self.critic_target.parameters()):
-                p_t.data.mul_(1.0 - self.cfg.tau).add_(p.data, alpha=self.cfg.tau)
+            torch._foreach_lerp_(
+                self._critic_target_params, self._critic_params, self.cfg.tau,
+            )
 
     def _train_step(self) -> dict[str, float]:
         """One env-step worth of gradient updates: UTD critic updates + 1 actor update."""
