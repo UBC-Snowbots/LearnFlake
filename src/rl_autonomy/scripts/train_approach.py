@@ -145,6 +145,11 @@ def main() -> int:
     p.add_argument("--eval-episodes", type=int, default=10)
     p.add_argument("--log-every", type=int, default=1_000,
                    help="terminal log every N env steps")
+    p.add_argument("--demos", type=Path, default=None,
+                   help=("path to an HDF5 file of demo transitions (from "
+                         "tools.gen_demos). When given, RLPD's demo buffer "
+                         "is populated before learning starts and the "
+                         "demo_fraction schedule kicks in. See TRACKER §29.4."))
     args = p.parse_args()
 
     save_dir = Path(args.save_dir).resolve()
@@ -193,6 +198,22 @@ def main() -> int:
     agent = RLPDSAC(env=train_env, config=cfg, device=args.device, eval_env=eval_env)
     print(f"[approach] obs(actor)={agent.actor_dim}  obs(critic)={agent.critic_dim}  "
           f"action={agent.action_dim}  device={agent.device}")
+
+    if args.demos is not None:
+        from rl_autonomy.data import load_demos_into_buffer
+        from rl_autonomy.envs._wrapper_utils import find_inner
+        from rl_autonomy.envs.obs_adapter import ObsAdapter
+        oa = find_inner(train_env, ObsAdapter)
+        # No re-normalize: at this point train RMS is uninitialized (count≈ε).
+        # The agent's RMS will warm up from online experience naturally; demo
+        # obs are clipped to ±10 from gen time, which is the same clip the
+        # agent uses post-normalize, so they live in roughly the right range.
+        n_loaded = load_demos_into_buffer(
+            args.demos, agent.replay.demos, obs_adapter=oa, re_normalize=False,
+        )
+        print(f"[approach] loaded {n_loaded} demo transitions from {args.demos}")
+        if n_loaded == 0:
+            print("[approach] WARNING: demo file empty; training will behave like vanilla SAC")
 
     tb = _TBLogger(str(log_dir))
 

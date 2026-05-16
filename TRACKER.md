@@ -1462,23 +1462,32 @@ This is the **demos wall**. RLPD's paper is explicit that the algorithm's stabil
 
 The infrastructure already exists; this is purely a data + wiring task.
 
-**Stage 1 — generate demos** (~1 hour wallclock):
+**Stage 1 — generate demos** ✅ **(done 2026-05-15, ~10 min wallclock):**
 
-`rl_autonomy/tools/m1_p_controller.py` already solves 9/20 keys via Jacobian-pseudoinverse IK. Run it in batch mode across many keys and seeds, save the successful trajectories as `(obs, action, reward, next_obs, terminated)` tuples in HDF5.
+Built `rl_autonomy/tools/gen_demos.py` (not the originally planned `m1_p_controller.py --save-demos`; deviation logged: cleaner separation between the controller and the demo-recording loop, and gen_demos can drive any open-loop policy in the future). It uses the same adaptive-weight DLS Jacobian inner loop (orientation weight 5.0/1.0/0.5 by current tilt; damping=0.06) and runs the wrapped env directly so the HDF5 transitions match the agent's observation pipeline.
 
-- Target: 100-200 successful demo trajectories covering Phase A keys.
-- Format: same as `algos.replay_buffer.Batch` but on disk.
-- Tool: extend `tools/m1_p_controller.py` with a `--save-demos PATH` flag.
+Critical fix during stage 1: ActionAdapter's α=0.4 EMA smoothing introduced lag the per-step IK couldn't recover from (first run was 0/6 successes). gen_demos walks the wrapper stack and sets `aa.alpha=0.0` for the duration of recording. After the bypass: 40/100 successful episodes on Phase A keys (5 trials × 20 keys), 1032 transitions saved to `demos/approach_phase_a.h5`.
 
-**Stage 2 — load demos into RLPD's demo buffer** (already implemented):
-
-`SymmetricReplayBuffer` already accepts a populated `demos` buffer. Add a CLI flag to `train_approach.py`:
+HDF5 schema (matches `algos.replay_buffer.Batch` field-for-field):
 
 ```
---demos PATH    # HDF5 file with demo trajectories
+/actor_obs        (N, 108)  float32  — frame-stacked actor obs from ObsAdapter
+/critic_obs       (N, 38)   float32  — privileged critic obs
+/action           (N, 7)    float32  — raw policy-space action in [-1, 1]
+/reward           (N,)      float32  — env reward in [0.36, 100.48]
+/next_actor_obs   (N, 108)  float32
+/next_critic_obs  (N, 38)   float32
+/terminated       (N,)      bool     — 40 True (one per successful episode end)
+/episode_id       (N,)      int32
+/trial_meta       group     — success log per (key, trial)
 ```
 
-That populates `agent.replay.demos` before training starts. Initial demo fraction 0.5 → 0.25 over 500k steps per `RLPDConfig.demo_fraction_*`.
+**Stage 2 — load demos into RLPD's demo buffer** ✅ **(done 2026-05-16):**
+
+- `rl_autonomy/data/demo_buffer.py::load_demos_into_buffer(h5_path, demo_buffer, obs_adapter=None, re_normalize=True)` reads the HDF5 and pushes each transition into the supplied `ReplayBuffer` (validates actor/critic/action dims; raises `ValueError` on mismatch, `FileNotFoundError` on missing path).
+- `train_approach.py` gains `--demos PATH`. The loader is called between `RLPDSAC` construction and `agent.learn()`, populating `agent.replay.demos`. Initial demo fraction 0.5 → 0.25 over 500k steps per `RLPDConfig.demo_fraction_*` is already configured.
+- Re-normalization at load time is implemented but disabled in train_approach because at training start RMS is uninitialized (count≈ε). The demo obs are already clipped to ±10 from gen-time normalization, which lives in roughly the same range the agent's converged RMS will produce — the residual drift is tolerable (~0.5% of buffer is demos).
+- Test coverage: `tests/test_demo_buffer.py` (5 tests, all passing): happy path, shape-mismatch, missing-file, empty-file, and re_normalize-with-warm-RMS. Full suite: 16 tests passing.
 
 **Stage 3 — re-train** (~2-3 hours wallclock):
 
