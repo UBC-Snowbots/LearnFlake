@@ -150,6 +150,12 @@ def main() -> int:
                          "tools.gen_demos). When given, RLPD's demo buffer "
                          "is populated before learning starts and the "
                          "demo_fraction schedule kicks in. See TRACKER §29.4."))
+    p.add_argument("--bc-warmup-epochs", type=int, default=0,
+                   help=("if >0, run BCPretrain.fit on agent.actor against the "
+                         "demo (obs, action) pairs for N epochs before SAC "
+                         "starts. Puts the actor INSIDE demo state distribution "
+                         "at SAC step 0 — Option E from TRACKER §32.4. "
+                         "Resets actor_opt momentum after to avoid stale buffers."))
     p.add_argument("--demo-fraction-final", type=float, default=None,
                    help=("override RLPDConfig.demo_fraction_final. Default = 0.25 "
                          "(v1/v1.1/v1.2/v1.3). TRACKER §32.4 Option D sets this "
@@ -235,6 +241,28 @@ def main() -> int:
         print(f"[approach] loaded {n_loaded} demo transitions from {args.demos}")
         if n_loaded == 0:
             print("[approach] WARNING: demo file empty; training will behave like vanilla SAC")
+
+        if args.bc_warmup_epochs > 0 and n_loaded > 0:
+            from rl_autonomy.algos.bc_pretrain import BCPretrain, BCConfig
+            print(f"[approach] BC warm-start: {args.bc_warmup_epochs} epochs on "
+                  f"{n_loaded} demo transitions")
+            d = agent.replay.demos
+            obs_np = d.actor_obs[:d.size].detach().cpu().numpy()
+            act_np = d.action[:d.size].detach().cpu().numpy()
+            bc = BCPretrain(
+                agent.actor,
+                BCConfig(epochs=args.bc_warmup_epochs, batch_size=256,
+                         lr=1e-3, weight_decay=1e-4, device=str(agent.device)),
+            )
+            bc_history = bc.fit(obs_np, act_np)
+            print(f"[approach] BC done. epoch 0 loss={bc_history['loss'][0]:.4f}, "
+                  f"final loss={bc_history['loss'][-1]:.4f}")
+            # Reset actor_opt momentum so the post-BC SAC update doesn't apply
+            # stale AdamW state to the new weights. Recreate with same config.
+            agent.actor_opt = torch.optim.AdamW(
+                agent.actor.parameters(),
+                lr=cfg.actor_lr, weight_decay=cfg.weight_decay,
+            )
 
     tb = _TBLogger(str(log_dir))
 

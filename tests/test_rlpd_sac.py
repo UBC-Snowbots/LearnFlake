@@ -311,6 +311,32 @@ def test_warm_up_env_rms_bootstraps_from_random_actions():
     assert env.rms.count > 200 - 1
 
 
+def test_bc_pretrain_reduces_actor_loss():
+    """BC fit should monotonically reduce NLL on a fittable batch."""
+    import torch
+    from rl_autonomy.algos.bc_pretrain import BCPretrain, BCConfig
+    from rl_autonomy.algos import Actor
+
+    torch.manual_seed(0)
+    np.random.seed(0)
+    obs_dim = 8
+    act_dim = 3
+
+    actor = Actor(obs_dim=obs_dim, action_dim=act_dim, hidden=(32, 32))
+    bc = BCPretrain(actor, BCConfig(epochs=20, batch_size=32, lr=1e-3, device="cpu"))
+
+    # Synthetic: actions = tanh(W·obs). Actor with tanh output should fit this.
+    W = np.random.randn(act_dim, obs_dim).astype(np.float32) * 0.5
+    obs = np.random.randn(256, obs_dim).astype(np.float32)
+    actions = np.tanh(obs @ W.T).astype(np.float32)
+
+    history = bc.fit(obs, actions)
+    assert history["loss"][-1] < history["loss"][0] - 0.5, (
+        f"BC didn't learn: epoch 0 loss={history['loss'][0]:.4f}, "
+        f"final={history['loss'][-1]:.4f}"
+    )
+
+
 def test_min_alpha_zero_disables_floor():
     """min_alpha=0 should be equivalent to vanilla SAC (no floor)."""
     from rl_autonomy.algos import RLPDSAC, RLPDConfig
