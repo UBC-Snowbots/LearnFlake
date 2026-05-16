@@ -150,6 +150,11 @@ def main() -> int:
                          "tools.gen_demos). When given, RLPD's demo buffer "
                          "is populated before learning starts and the "
                          "demo_fraction schedule kicks in. See TRACKER §29.4."))
+    p.add_argument("--demo-fraction-final", type=float, default=None,
+                   help=("override RLPDConfig.demo_fraction_final. Default = 0.25 "
+                         "(v1/v1.1/v1.2/v1.3). TRACKER §32.4 Option D sets this "
+                         "to 0.5 to keep demos at 50%% of every batch — keeps the "
+                         "success-rich demo signal strong for the whole run."))
     p.add_argument("--reward-mode", choices=["dense", "pbrs_only", "xy_focus"], default="dense",
                    help=("'dense' = original v1 reward (tolerance shaping + PBRS + "
                          "sparse). 'pbrs_only' = TRACKER §30 Option A — drop the "
@@ -173,6 +178,7 @@ def main() -> int:
     print(f"[approach] UTD     ={args.utd}")
     print(f"[approach] DR      ={'on' if args.domain_rand else 'off'}")
     print(f"[approach] reward  ={args.reward_mode}")
+    print(f"[approach] demo_f  =init {cfg.demo_fraction_init} → final {cfg.demo_fraction_final} over {cfg.demo_fraction_decay_steps} steps")
 
     # Envs
     train_env = make_env(
@@ -198,11 +204,17 @@ def main() -> int:
     # return gap that traced back to this.)
     _share_normalizer(train_env, eval_env)
 
-    cfg = RLPDConfig(
+    cfg_kwargs = dict(
         update_to_data=args.utd,
         warmstart_steps=args.warmstart,
         seed=args.seed,
     )
+    if args.demo_fraction_final is not None:
+        cfg_kwargs["demo_fraction_final"] = args.demo_fraction_final
+        # Keep f_init >= f_final so the schedule is monotone-decreasing-or-flat.
+        if args.demo_fraction_final > 0.5:
+            cfg_kwargs["demo_fraction_init"] = args.demo_fraction_final
+    cfg = RLPDConfig(**cfg_kwargs)
     agent = RLPDSAC(env=train_env, config=cfg, device=args.device, eval_env=eval_env)
     print(f"[approach] obs(actor)={agent.actor_dim}  obs(critic)={agent.critic_dim}  "
           f"action={agent.action_dim}  device={agent.device}")
