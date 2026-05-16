@@ -178,7 +178,6 @@ def main() -> int:
     print(f"[approach] UTD     ={args.utd}")
     print(f"[approach] DR      ={'on' if args.domain_rand else 'off'}")
     print(f"[approach] reward  ={args.reward_mode}")
-    print(f"[approach] demo_f  =init {cfg.demo_fraction_init} → final {cfg.demo_fraction_final} over {cfg.demo_fraction_decay_steps} steps")
 
     # Envs
     train_env = make_env(
@@ -215,6 +214,8 @@ def main() -> int:
         if args.demo_fraction_final > 0.5:
             cfg_kwargs["demo_fraction_init"] = args.demo_fraction_final
     cfg = RLPDConfig(**cfg_kwargs)
+    print(f"[approach] demo_f  =init {cfg.demo_fraction_init} → final "
+          f"{cfg.demo_fraction_final} over {cfg.demo_fraction_decay_steps} steps")
     agent = RLPDSAC(env=train_env, config=cfg, device=args.device, eval_env=eval_env)
     print(f"[approach] obs(actor)={agent.actor_dim}  obs(critic)={agent.critic_dim}  "
           f"action={agent.action_dim}  device={agent.device}")
