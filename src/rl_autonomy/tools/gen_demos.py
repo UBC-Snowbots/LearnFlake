@@ -241,6 +241,9 @@ def main() -> int:
     p.add_argument("--max-steps", type=int, default=200)
     p.add_argument("--seed-base", type=int, default=0)
     p.add_argument("--frame-stack", type=int, default=3)
+    p.add_argument("--reward-mode", choices=["dense", "pbrs_only"], default="dense",
+                   help="must match the reward_mode used by train_approach for "
+                        "the saved (reward, next_obs) tuples to be valid demo data")
     args = p.parse_args()
 
     if args.keys in KEY_GROUPS:
@@ -257,7 +260,9 @@ def main() -> int:
           f"max_steps={args.max_steps}")
 
     env = make_env(mode="approach", frame_stack=args.frame_stack,
-                   domain_rand=False, seed=args.seed_base)
+                   domain_rand=False, seed=args.seed_base,
+                   reward_mode=args.reward_mode)
+    print(f"[gen_demos] reward_mode={args.reward_mode}")
     kb = find_inner(env, KeyboardEnv)
     assert kb is not None
 

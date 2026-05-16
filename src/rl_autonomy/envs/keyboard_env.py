@@ -145,12 +145,18 @@ class KeyboardEnv(ManipulationEnv):
         render: bool = False,
         use_camera_obs: bool = False,
         gamma: float = 0.99,
+        reward_mode: str = "dense",
         **kwargs: Any,
     ) -> None:
         if mode not in ("approach", "strike"):
             raise ValueError(f"mode must be 'approach' or 'strike', got {mode!r}")
+        if reward_mode not in ("dense", "pbrs_only"):
+            raise ValueError(
+                f"reward_mode must be 'dense' or 'pbrs_only', got {reward_mode!r}"
+            )
 
         self.mode: Mode = mode
+        self.reward_mode: str = reward_mode
         self.keyboard_offset = np.array(keyboard_offset)
         self.keyboard_height = float(keyboard_height)
         self.random_key = bool(random_key)
@@ -370,6 +376,16 @@ class KeyboardEnv(ManipulationEnv):
         self._prev_action = action_arr
         self._collision_flag = collision
 
+        if self.reward_mode == "pbrs_only":
+            # TRACKER §30.6 Option A — kill the dense tolerance terms so the
+            # agent can't settle into the hover attractor that the Gaussian
+            # tolerance shape creates. Keep success bonus, collision, time
+            # penalty, and PBRS (which is policy-invariant).
+            sparse_total = (
+                components.r_success + components.r_collision + components.r_time
+            )
+            return float(sparse_total + r_pbrs)
+
         return float(components.total + r_pbrs)
 
     def _strike_reward(self, action: Optional[np.ndarray]) -> float:
@@ -570,6 +586,7 @@ def make_env(
     frame_stack: int = 3,
     horizon: int | None = None,
     seed: int | None = None,
+    reward_mode: str = "dense",
 ):
     """Build a fully-wrapped gym.Env ready for training.
 
@@ -591,6 +608,7 @@ def make_env(
         render=render,
         random_key=random_key,
         horizon=horizon,
+        reward_mode=reward_mode,
     )
     gym_env = KeyboardGymEnv(base, mode=mode, seed=seed)
     env = ActionAdapter(gym_env, mode=mode)

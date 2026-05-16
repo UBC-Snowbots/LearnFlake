@@ -150,6 +150,11 @@ def main() -> int:
                          "tools.gen_demos). When given, RLPD's demo buffer "
                          "is populated before learning starts and the "
                          "demo_fraction schedule kicks in. See TRACKER §29.4."))
+    p.add_argument("--reward-mode", choices=["dense", "pbrs_only"], default="dense",
+                   help=("'dense' = original v1 reward (tolerance shaping + PBRS + "
+                         "sparse). 'pbrs_only' = TRACKER §30 Option A — drop the "
+                         "Gaussian tolerance dense terms (kept the hover attractor "
+                         "alive in v1/v1.1); keep PBRS, success, collision, time."))
     args = p.parse_args()
 
     save_dir = Path(args.save_dir).resolve()
@@ -167,15 +172,18 @@ def main() -> int:
     print(f"[approach] steps   ={args.steps:_}")
     print(f"[approach] UTD     ={args.utd}")
     print(f"[approach] DR      ={'on' if args.domain_rand else 'off'}")
+    print(f"[approach] reward  ={args.reward_mode}")
 
     # Envs
     train_env = make_env(
         mode="approach", frame_stack=args.frame_stack,
         domain_rand=args.domain_rand, render=False, seed=args.seed,
+        reward_mode=args.reward_mode,
     )
     eval_env = make_env(
         mode="approach", frame_stack=args.frame_stack,
         domain_rand=False, render=False, seed=args.seed + 1,
+        reward_mode=args.reward_mode,
     )
 
     curriculum = KeyPhaseCurriculum(advance_threshold=0.85, window=200, seed=args.seed)
