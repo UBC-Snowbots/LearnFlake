@@ -150,7 +150,7 @@ def main() -> int:
                          "tools.gen_demos). When given, RLPD's demo buffer "
                          "is populated before learning starts and the "
                          "demo_fraction schedule kicks in. See TRACKER §29.4."))
-    p.add_argument("--reward-mode", choices=["dense", "pbrs_only"], default="dense",
+    p.add_argument("--reward-mode", choices=["dense", "pbrs_only", "xy_focus"], default="dense",
                    help=("'dense' = original v1 reward (tolerance shaping + PBRS + "
                          "sparse). 'pbrs_only' = TRACKER §30 Option A — drop the "
                          "Gaussian tolerance dense terms (kept the hover attractor "

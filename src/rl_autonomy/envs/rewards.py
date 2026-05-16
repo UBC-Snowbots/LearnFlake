@@ -51,6 +51,19 @@ APPROACH_W_Z = 0.15
 APPROACH_W_TILT = 0.075
 APPROACH_W_SMOOTH = 0.025
 
+# Option B from TRACKER §30.6 / §31.3 — xy-dominant weights paired with a
+# long-tail sigmoid for r_xy so the gradient toward goal is large at distance.
+# Used only when KeyboardEnv.reward_mode == 'xy_focus'. r_z and r_tilt are
+# present in tiny doses to keep the actuator pointed roughly down, but they
+# cannot dominate the trade against r_xy (which is what tanked v1/v1.1 — the
+# agent kept settling at hover height while drifting xy away).
+APPROACH_W_XY_FOCUS = 0.70
+APPROACH_W_Z_FOCUS = 0.05
+APPROACH_W_TILT_FOCUS = 0.05
+APPROACH_W_SMOOTH_FOCUS = 0.0       # no smoothness pull — let demos dictate
+APPROACH_XY_FOCUS_MARGIN = 0.15      # 15cm — half keyboard span; gradient is
+                                      # meaningful across the whole workspace
+
 # Sparse / penalty weights — applied on top of dense shaping.
 #
 # IMPORTANT: success bonus must dominate the per-episode dense-reward sum.
@@ -87,6 +100,7 @@ def approach_reward(
     action_delta: float,
     success: bool,
     collision: bool,
+    mode: str = "dense",
 ) -> ApproachRewardComponents:
     """Compute the Approach reward per TRACKER §5.2.
 
@@ -97,35 +111,58 @@ def approach_reward(
         action_delta: ‖a_t - a_{t-1}‖ for smoothness term.
         success: True iff all three tolerances are simultaneously satisfied.
         collision: True iff the EEF or actuator collided with the keyboard surface.
+        mode: 'dense' (v1 default — Gaussian tolerance on all four terms with
+            equal-ish weights) or 'xy_focus' (TRACKER §31 Option B — xy
+            dominates, long-tail sigmoid on r_xy for non-vanishing gradient
+            at distance). 'pbrs_only' is implemented at the env level (zeroes
+            the components total) and not here.
 
     Returns:
-        Component breakdown plus total. Total ∈ approximately [-2.01, 101].
-        (Wide range because success bonus = 100 dominates; per-episode
-        return is bounded ~ [-2.01·H, dense·H + 100].)
+        Component breakdown plus total.
     """
-    r_xy = float(dm_rewards.tolerance(
-        xy_dist, bounds=APPROACH_XY_BOUNDS,
-        margin=APPROACH_XY_MARGIN, sigmoid="gaussian",
-    ))
-    r_z = float(dm_rewards.tolerance(
-        z_error, bounds=APPROACH_Z_BOUNDS,
-        margin=APPROACH_Z_MARGIN, sigmoid="gaussian",
-    ))
-    r_tilt = float(dm_rewards.tolerance(
-        tilt, bounds=APPROACH_TILT_BOUNDS,
-        margin=APPROACH_TILT_MARGIN, sigmoid="gaussian",
-    ))
-    r_smooth = float(dm_rewards.tolerance(
-        action_delta, bounds=APPROACH_SMOOTH_BOUNDS,
-        margin=APPROACH_SMOOTH_MARGIN, sigmoid="linear",
-    ))
+    if mode == "xy_focus":
+        # Long-tail sigmoid: value = 1 / (1 + (x/margin)²). Reaches 0.5 at
+        # x=margin, ~0.2 at 2·margin. Gradient stays meaningful at distance.
+        r_xy = float(dm_rewards.tolerance(
+            xy_dist, bounds=APPROACH_XY_BOUNDS,
+            margin=APPROACH_XY_FOCUS_MARGIN, sigmoid="long_tail",
+        ))
+        r_z = float(dm_rewards.tolerance(
+            z_error, bounds=APPROACH_Z_BOUNDS,
+            margin=APPROACH_Z_MARGIN, sigmoid="gaussian",
+        ))
+        r_tilt = float(dm_rewards.tolerance(
+            tilt, bounds=APPROACH_TILT_BOUNDS,
+            margin=APPROACH_TILT_MARGIN, sigmoid="gaussian",
+        ))
+        r_smooth = 0.0      # disabled in xy_focus (zero weight anyway)
+        w_xy, w_z, w_tilt, w_smooth = (
+            APPROACH_W_XY_FOCUS, APPROACH_W_Z_FOCUS,
+            APPROACH_W_TILT_FOCUS, APPROACH_W_SMOOTH_FOCUS,
+        )
+    else:
+        # 'dense' (v1) — original Gaussian tolerance + equal-ish weights.
+        r_xy = float(dm_rewards.tolerance(
+            xy_dist, bounds=APPROACH_XY_BOUNDS,
+            margin=APPROACH_XY_MARGIN, sigmoid="gaussian",
+        ))
+        r_z = float(dm_rewards.tolerance(
+            z_error, bounds=APPROACH_Z_BOUNDS,
+            margin=APPROACH_Z_MARGIN, sigmoid="gaussian",
+        ))
+        r_tilt = float(dm_rewards.tolerance(
+            tilt, bounds=APPROACH_TILT_BOUNDS,
+            margin=APPROACH_TILT_MARGIN, sigmoid="gaussian",
+        ))
+        r_smooth = float(dm_rewards.tolerance(
+            action_delta, bounds=APPROACH_SMOOTH_BOUNDS,
+            margin=APPROACH_SMOOTH_MARGIN, sigmoid="linear",
+        ))
+        w_xy, w_z, w_tilt, w_smooth = (
+            APPROACH_W_XY, APPROACH_W_Z, APPROACH_W_TILT, APPROACH_W_SMOOTH,
+        )
 
-    dense = (
-        APPROACH_W_XY * r_xy
-        + APPROACH_W_Z * r_z
-        + APPROACH_W_TILT * r_tilt
-        + APPROACH_W_SMOOTH * r_smooth
-    )
+    dense = w_xy * r_xy + w_z * r_z + w_tilt * r_tilt + w_smooth * r_smooth
     r_success = APPROACH_W_SUCCESS if success else 0.0
     r_collision = APPROACH_W_COLLISION if collision else 0.0
     r_time = APPROACH_W_TIME

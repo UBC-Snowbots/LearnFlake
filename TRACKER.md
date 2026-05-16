@@ -1606,3 +1606,57 @@ Option A is the cleanest fix and cheap to try — flip a flag in `rewards.py`, r
 - **eval_return is a misleading proxy when dense reward has a strong local optimum.** A high eval_return tells you the agent is collecting reward, not that it's solving the task. Always cross-check with `inspect_policy` on canonical keys *before* drawing conclusions from training-eval alone.
 - **Gaussian tolerance shaping is dangerous on multi-dimensional approach tasks.** Different dimensions have different "natural distances" from the target, so each `r_*` term enters its strong-gradient region at a different time. The agent learns whichever one is easiest first and gets stuck there.
 - **The peak eval of +39.67 at step 160k was diagnostic noise**, not progress — it just means a slightly different hover policy gave slightly more dense reward on that particular eval batch.
+
+---
+
+## 31 — v1.2 (pbrs_only): hypothesis falsified at 100k
+
+Implemented TRACKER §30.6 Option A in commit `e47524a`: added `reward_mode={'dense','pbrs_only'}` flag to KeyboardEnv, threaded through `make_env` → `train_approach` → `gen_demos`. In pbrs_only mode the dense Gaussian tolerance terms are dropped; only success bonus, collision, time, and PBRS remain.
+
+Re-generated demos under pbrs_only (40/100 successful M1 episodes, same trajectory shape; 1032 transitions saved to `demos/approach_phase_a_pbrs.h5`). Launched approach_v4 with `--reward-mode pbrs_only --demos demos/approach_phase_a_pbrs.h5 --domain-rand --utd 2` for 200k steps.
+
+### 31.1 What happened — terminated at step 100k
+
+| step | eval_return |
+|---|---|
+| 10k | -166.30 |
+| 20k | -192.69 |
+| 30k | -22.59 |
+| 40k | **-4.81** (best) |
+| 50k | -82.34 |
+| 60k | -91.99 |
+| 70k | -155.72 |
+| 80k | -124.19 |
+| 90k | -84.86 |
+| 100k | -126.29 |
+
+Brief glimmer at step 30-40k where the agent approached the "do-nothing-bad" floor (-4.86 = time penalty over 200 steps + ε PBRS at standstill), then regressed. Mean since step 30k: **-88**. Never approached the success regime (+95).
+
+### 31.2 Why pbrs_only failed — PBRS gradient is too weak
+
+PBRS reward per step:
+- Stand still at xy=5cm: `r_pbrs = (γ-1)·Φ(s) = -0.01·(-0.07) = +0.0007`
+- Move 1mm closer: `r_pbrs = +0.00169`
+- Move 1mm farther: `r_pbrs = -0.00029`
+
+The differential between "closer" and "stand still" is only **+0.001 per step**, vs the per-step time penalty -0.025. The agent needs 25 mm of consistent progress per step *just to break even* with standstill, and the SAC actor's exploration noise dominates a gradient that small.
+
+Demos in the buffer (50→25% fraction) provided high-Q targets but the actor couldn't bridge from its current low-Q online distribution to the demo distribution — classic offline-to-online extrapolation error. The actor saw "demo states are valuable" but had no policy gradient toward reaching them, because its online trajectories never overlapped with demo state distribution.
+
+### 31.3 Root cause is more general than §30 suggested
+
+§30.6 framed the problem as "Gaussian tolerance dense terms create a hover attractor." Removing them turned out to expose a deeper issue: **the success bonus is too far from the agent's online distribution and the auxiliary gradient (PBRS or dense) is the only thing connecting them. PBRS alone is too weak; dense (v3) has a local maximum away from success.**
+
+The fix needs to provide a *strong, monotone* gradient from the workspace to the success region. Three viable approaches:
+
+- **Option B (§30.6) — xy-dominant dense + wider margin / long-tail sigmoid.** Make `r_xy` ≫ `r_z`/`r_tilt` so the agent can't trade XY for Z. Combined with a long-tail sigmoid (or just wider margin) so the gradient at 5-10cm is non-zero. Lowest-cost experiment.
+- **BC warmup before SAC.** Pre-train the actor on demos for 10-20k steps to put it inside demo state distribution, then switch to RLPD. Removes the distribution-gap bootstrap problem.
+- **Pure imitation learning (BC).** Skip RL entirely. M1 demos cover ~40% of Phase A; train a deterministic actor on them and accept ~40% success rate as v1's ceiling.
+
+Going with Option B next (smallest code change; tests the gradient hypothesis directly).
+
+### 31.4 Lessons (extending §30.7)
+
+- **Removing a bad local optimum doesn't help if there's no gradient toward the global optimum.** The pbrs_only experiment cleared the hover attractor but left the agent in a flat reward landscape with weak PBRS signal — and a flat landscape is just as un-learnable as a deceptive one.
+- **Demos don't fix distribution gaps by themselves.** RLPD's symmetric buffer assumes the online actor can roughly imitate demo behavior with exploration. If the actor's natural exploration distribution is far from demo distribution, the demos just inflate Q-targets without providing actionable policy gradient.
+- **Always estimate the gradient magnitude before committing to a reward shape.** A 30-second back-of-envelope (Φ change for a 1mm step) would have caught this before training.

@@ -63,6 +63,53 @@ def test_pbrs_only_success_bonus_still_dominates():
     assert sparse_total > 99.0  # one success step dominates a whole hover episode
 
 
+def test_xy_focus_gradient_at_distance():
+    """In xy_focus mode, r_xy must give meaningful gradient at 5-10cm out.
+
+    The §31 falsified hypothesis was that PBRS alone could pull the agent
+    in. xy_focus uses long_tail sigmoid + 15cm margin so r_xy is well above
+    zero at the workspace edge. Verifies the gradient direction (closer →
+    bigger reward) and a minimum magnitude that won't be washed out by
+    exploration noise.
+    """
+    from rl_autonomy.envs.rewards import approach_reward
+
+    far = approach_reward(0.10, 0.005, 0.05, 0.0,
+                          success=False, collision=False, mode="xy_focus")
+    mid = approach_reward(0.05, 0.005, 0.05, 0.0,
+                          success=False, collision=False, mode="xy_focus")
+    close = approach_reward(0.01, 0.005, 0.05, 0.0,
+                            success=False, collision=False, mode="xy_focus")
+
+    # Monotone increasing as xy_dist shrinks.
+    assert far.r_xy < mid.r_xy < close.r_xy
+    # Meaningful magnitude at 10cm — long_tail gives ~0.18 at 10cm with margin 15cm.
+    assert far.r_xy > 0.15
+    # Differential between mid (5cm) and far (10cm) is the gradient signal
+    # the agent needs to follow. With weight 0.7, this should be ~0.2 per
+    # 5cm closer = sizable per-step learning signal.
+    assert (mid.r_xy - far.r_xy) > 0.05
+
+
+def test_xy_focus_z_cannot_dominate_xy():
+    """Hover-at-distance (z=0 error, xy=8cm) must NOT outscore close-but-bad-z."""
+    from rl_autonomy.envs.rewards import approach_reward
+
+    # Old v3 failure pose: hovering at correct height but xy=8cm away
+    hover_far = approach_reward(0.08, 0.001, 0.02, 0.0,
+                                success=False, collision=False, mode="xy_focus")
+    # Close in xy but z is at workspace edge
+    close_bad_z = approach_reward(0.01, 0.02, 0.05, 0.0,
+                                  success=False, collision=False, mode="xy_focus")
+
+    # In v3 (dense), hover_far beat close_bad_z by ~0.07/step → 200·0.07 = +14 episodes.
+    # In xy_focus, close_bad_z must beat hover_far so the agent prefers XY closeness.
+    assert close_bad_z.total > hover_far.total, (
+        f"xy_focus must penalize hovering at distance: "
+        f"close_bad_z={close_bad_z.total:.4f} <= hover_far={hover_far.total:.4f}"
+    )
+
+
 def test_make_env_threads_reward_mode():
     """make_env(reward_mode=...) propagates to KeyboardEnv.reward_mode."""
     import os
@@ -71,11 +118,12 @@ def test_make_env_threads_reward_mode():
     from rl_autonomy.envs import make_env, KeyboardEnv
     from rl_autonomy.envs._wrapper_utils import find_inner
 
-    env = make_env(mode="approach", frame_stack=2, domain_rand=False,
-                   reward_mode="pbrs_only")
-    try:
-        kb = find_inner(env, KeyboardEnv)
-        assert kb is not None
-        assert kb.reward_mode == "pbrs_only"
-    finally:
-        env.close()
+    for mode in ("pbrs_only", "xy_focus"):
+        env = make_env(mode="approach", frame_stack=2, domain_rand=False,
+                       reward_mode=mode)
+        try:
+            kb = find_inner(env, KeyboardEnv)
+            assert kb is not None
+            assert kb.reward_mode == mode
+        finally:
+            env.close()

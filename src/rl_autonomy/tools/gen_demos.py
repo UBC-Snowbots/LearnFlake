@@ -241,7 +241,7 @@ def main() -> int:
     p.add_argument("--max-steps", type=int, default=200)
     p.add_argument("--seed-base", type=int, default=0)
     p.add_argument("--frame-stack", type=int, default=3)
-    p.add_argument("--reward-mode", choices=["dense", "pbrs_only"], default="dense",
+    p.add_argument("--reward-mode", choices=["dense", "pbrs_only", "xy_focus"], default="dense",
                    help="must match the reward_mode used by train_approach for "
                         "the saved (reward, next_obs) tuples to be valid demo data")
     args = p.parse_args()

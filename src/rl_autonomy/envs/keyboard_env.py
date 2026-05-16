@@ -150,9 +150,10 @@ class KeyboardEnv(ManipulationEnv):
     ) -> None:
         if mode not in ("approach", "strike"):
             raise ValueError(f"mode must be 'approach' or 'strike', got {mode!r}")
-        if reward_mode not in ("dense", "pbrs_only"):
+        if reward_mode not in ("dense", "pbrs_only", "xy_focus"):
             raise ValueError(
-                f"reward_mode must be 'dense' or 'pbrs_only', got {reward_mode!r}"
+                f"reward_mode must be one of ('dense','pbrs_only','xy_focus'), "
+                f"got {reward_mode!r}"
             )
 
         self.mode: Mode = mode
@@ -357,6 +358,12 @@ class KeyboardEnv(ManipulationEnv):
         )
         success = approach_success(xy_dist, z_error, tilt)
         collision = self._detect_collision()
+        # `mode='xy_focus'` flips on the §31 Option B shape inside approach_reward.
+        # `pbrs_only` still computes dense components (we use them below for the
+        # sparse-total derivation), it just doesn't include them in the env total.
+        reward_mode_for_components = (
+            "xy_focus" if self.reward_mode == "xy_focus" else "dense"
+        )
         components = approach_reward(
             xy_dist=xy_dist,
             z_error=z_error,
@@ -364,6 +371,7 @@ class KeyboardEnv(ManipulationEnv):
             action_delta=action_delta,
             success=success,
             collision=collision,
+            mode=reward_mode_for_components,
         )
 
         # PBRS layered on top of tolerance shaping (TRACKER §5.3).
