@@ -477,8 +477,45 @@ class RLPDSAC:
     def load(self, path: str, apply_rms_to_env: bool = True) -> None:
         """Load weights + opts + counters. If the checkpoint includes an RMS
         state and ``apply_rms_to_env`` is True, also apply it to the env's
-        ObsAdapter (if one is present in the wrapper stack)."""
+        ObsAdapter (if one is present in the wrapper stack).
+
+        If the checkpoint was trained with a different ``actor_hidden`` /
+        ``critic_hidden`` than the current config, rebuild the networks
+        (and their optimizers) to match the checkpoint before loading the
+        state_dicts. Without this, loading a 512³ actor into a 256³ shell
+        raises a shape-mismatch error (TRACKER §34 v10 failure mode).
+        """
         ckpt = torch.load(path, map_location=self.device, weights_only=False)
+
+        # Rebuild networks if architecture changed (recorded in ckpt['config']).
+        saved_cfg = ckpt.get("config", {})
+        saved_actor_hidden = tuple(saved_cfg.get("actor_hidden", self.cfg.actor_hidden))
+        saved_critic_hidden = tuple(saved_cfg.get("critic_hidden", self.cfg.critic_hidden))
+        if (saved_actor_hidden != tuple(self.cfg.actor_hidden)
+                or saved_critic_hidden != tuple(self.cfg.critic_hidden)):
+            from .networks import Actor, EnsembleCritic
+            self.cfg.actor_hidden = saved_actor_hidden
+            self.cfg.critic_hidden = saved_critic_hidden
+            self.actor = Actor(
+                obs_dim=self.actor_dim, action_dim=self.action_dim,
+                hidden=saved_actor_hidden, use_layer_norm=self.cfg.use_layer_norm,
+            ).to(self.device)
+            self.critic = EnsembleCritic(
+                obs_dim=self.critic_dim, action_dim=self.action_dim, n_critics=self.cfg.n_critics,
+                hidden=saved_critic_hidden, use_layer_norm=self.cfg.use_layer_norm,
+            ).to(self.device)
+            self.critic_target = EnsembleCritic(
+                obs_dim=self.critic_dim, action_dim=self.action_dim, n_critics=self.cfg.n_critics,
+                hidden=saved_critic_hidden, use_layer_norm=self.cfg.use_layer_norm,
+            ).to(self.device)
+            # Fresh optimizers — old ones reference the dropped parameter tensors.
+            self.actor_opt = torch.optim.AdamW(
+                self.actor.parameters(), lr=self.cfg.actor_lr, weight_decay=self.cfg.weight_decay,
+            )
+            self.critic_opt = torch.optim.AdamW(
+                self.critic.parameters(), lr=self.cfg.critic_lr, weight_decay=self.cfg.weight_decay,
+            )
+
         self.actor.load_state_dict(ckpt["actor"])
         self.critic.load_state_dict(ckpt["critic"])
         self.critic_target.load_state_dict(ckpt["critic_target"])

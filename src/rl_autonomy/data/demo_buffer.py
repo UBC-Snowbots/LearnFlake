@@ -44,6 +44,7 @@ def load_demos_into_buffer(
     demo_buffer: ReplayBuffer,
     obs_adapter=None,
     re_normalize: bool = True,
+    max_episode_steps: int | None = None,
 ) -> int:
     """Load demos from HDF5 into the supplied ``demo_buffer``.
 
@@ -55,6 +56,10 @@ def load_demos_into_buffer(
             re-normalize the demo observations before pushing into the buffer.
             Pass ``None`` to load raw (no re-normalization).
         re_normalize: when True and ``obs_adapter`` is given, re-normalize.
+        max_episode_steps: if set, drop transitions belonging to episodes
+            whose length exceeds this. TRACKER §34.5 Option B — filter out
+            M1's marginal-key trajectories (the long, noisy ones) that
+            confused BC when training on the all-keys demo set.
 
     Returns:
         Number of transitions loaded.
@@ -71,11 +76,27 @@ def load_demos_into_buffer(
         n_actor = f["next_actor_obs"][:]
         n_critic = f["next_critic_obs"][:]
         terminated = f["terminated"][:]
+        episode_id = f["episode_id"][:]
         meta_attrs = dict(f["trial_meta"].attrs)
 
     N = actor.shape[0]
     if N == 0:
         return 0
+
+    if max_episode_steps is not None:
+        # Count transitions per episode_id; keep only short episodes.
+        unique, counts = np.unique(episode_id, return_counts=True)
+        keep_eps = set(int(eid) for eid, c in zip(unique, counts) if c <= max_episode_steps)
+        mask = np.array([int(eid) in keep_eps for eid in episode_id], dtype=bool)
+        before = N
+        actor = actor[mask]; critic = critic[mask]; action = action[mask]
+        reward = reward[mask]; n_actor = n_actor[mask]; n_critic = n_critic[mask]
+        terminated = terminated[mask]; episode_id = episode_id[mask]
+        N = actor.shape[0]
+        n_eps_before = len(unique)
+        n_eps_after = len(keep_eps)
+        print(f"[demo_buffer] filtered to max_episode_steps={max_episode_steps}: "
+              f"{n_eps_after}/{n_eps_before} episodes, {N}/{before} transitions")
 
     # Shape sanity
     if actor.shape[1] != demo_buffer.actor_obs.shape[1]:

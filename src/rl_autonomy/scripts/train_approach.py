@@ -166,6 +166,12 @@ def main() -> int:
                          "sparse). 'pbrs_only' = TRACKER §30 Option A — drop the "
                          "Gaussian tolerance dense terms (kept the hover attractor "
                          "alive in v1/v1.1); keep PBRS, success, collision, time."))
+    p.add_argument("--max-demo-episode-steps", type=int, default=None,
+                   help=("filter loaded demos to only those whose M1-IK episode "
+                         "took ≤N steps to succeed. TRACKER §34.5 Option B — "
+                         "drop M1's marginal-key (long, noisy) trajectories that "
+                         "confused BC on the all-keys demo set (v9 3/435, v10 2/435 "
+                         "vs v8's 10/435 on the cleaner 1032-transition set)."))
     p.add_argument("--actor-hidden", type=str, default=None,
                    help=("comma-separated actor MLP hidden widths, e.g. '512,512,512'. "
                          "Default = RLPDConfig.actor_hidden = (256, 256, 256). "
@@ -250,6 +256,7 @@ def main() -> int:
         # agent uses post-normalize, so they live in roughly the right range.
         n_loaded = load_demos_into_buffer(
             args.demos, agent.replay.demos, obs_adapter=oa, re_normalize=False,
+            max_episode_steps=args.max_demo_episode_steps,
         )
         print(f"[approach] loaded {n_loaded} demo transitions from {args.demos}")
         if n_loaded == 0:
