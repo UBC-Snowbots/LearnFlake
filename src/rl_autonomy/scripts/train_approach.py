@@ -166,6 +166,11 @@ def main() -> int:
                          "sparse). 'pbrs_only' = TRACKER §30 Option A — drop the "
                          "Gaussian tolerance dense terms (kept the hover attractor "
                          "alive in v1/v1.1); keep PBRS, success, collision, time."))
+    p.add_argument("--actor-hidden", type=str, default=None,
+                   help=("comma-separated actor MLP hidden widths, e.g. '512,512,512'. "
+                         "Default = RLPDConfig.actor_hidden = (256, 256, 256). "
+                         "TRACKER §34.5 Option A — bigger actor for diverse-demo BC. "
+                         "Critic hidden is left at the default (512, 512, 512)."))
     args = p.parse_args()
 
     save_dir = Path(args.save_dir).resolve()
@@ -184,6 +189,7 @@ def main() -> int:
     print(f"[approach] UTD     ={args.utd}")
     print(f"[approach] DR      ={'on' if args.domain_rand else 'off'}")
     print(f"[approach] reward  ={args.reward_mode}")
+    print(f"[approach] actor_h ={cfg.actor_hidden}  critic_h={cfg.critic_hidden}")
 
     # Envs
     train_env = make_env(
@@ -219,6 +225,13 @@ def main() -> int:
         # Keep f_init >= f_final so the schedule is monotone-decreasing-or-flat.
         if args.demo_fraction_final > 0.5:
             cfg_kwargs["demo_fraction_init"] = args.demo_fraction_final
+    if args.actor_hidden is not None:
+        hidden = tuple(int(w) for w in args.actor_hidden.split(",") if w.strip())
+        if len(hidden) < 2 or any(w < 8 for w in hidden):
+            raise ValueError(
+                f"--actor-hidden must be 2+ ints each ≥8; got {hidden}"
+            )
+        cfg_kwargs["actor_hidden"] = hidden
     cfg = RLPDConfig(**cfg_kwargs)
     print(f"[approach] demo_f  =init {cfg.demo_fraction_init} → final "
           f"{cfg.demo_fraction_final} over {cfg.demo_fraction_decay_steps} steps")
