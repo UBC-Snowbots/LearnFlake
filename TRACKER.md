@@ -1525,3 +1525,84 @@ This pushes past the demos wall. If we want full 87-key coverage, demos must inc
 | M3 Approach training | trained — but state-independent policy ❌ |
 | M4 full 87-key chain | 0/87 ❌ |
 | v1.1 demo-bootstrap plan | documented in §29.4 ✅ |
+
+---
+
+## 30 — v1.1 result: same wall, different shape (2026-05-16)
+
+Stage 1 ✅ (1032 demos / 40 episodes / 40% M1 success on Phase A).
+Stage 2 ✅ (HDF5 loader + `--demos PATH`, 16/16 tests).
+Stage 3 ❌ — re-trained with the demos, hit a new failure mode.
+
+### 30.1 What we ran
+
+200k steps, UTD=2, α floor=0.1, DR on, `--demos demos/approach_phase_a.h5`. Demo fraction 0.5 → 0.25 across 500k steps (only fully decayed past 100k of *online* steps; we trained 200k, so we were squarely in the demo-anchored regime). v3 checkpoints in `checkpoints/approach_v3/`.
+
+### 30.2 What training looked like
+
+- α floor held at 0.1; floor bounced back to 0.18-0.25 by step 30k (the §26 fix is doing its job).
+- critic_loss stable at 0.07-0.78 throughout — no Q-overestimation cascade.
+- ep_return(20) stuck at -3.20 from step 6k onward (training-time success rate near zero).
+- Training-eval bounced wildly: +18, -23, +1.5, **-129**, +7, +34, -73, +3, +20, +7, -33, **+37**, +31, +7, +30, **+40**, +26, +23, -54, +22.
+- Peak +39.67 @ step 160k, six-of-last-ten averaged +20 — significantly better than v1's peak of +23 at step 100k.
+
+We thought this was real improvement.
+
+### 30.3 eval_orchestrator: 0/435 — same as v1
+
+Ran on `approach_step_000150000.pt` (best saved-checkpoint eval of +30.28).
+
+| | v3 |
+|---|---|
+| Approach success | 0/435 (0.0%) |
+| Full chain success | 0/435 (0.0%) |
+| Keys at 100% success | 0/87 |
+
+Identical to v1's M4 result. Even on Phase A keys covered by the demos. Phase A demo keys including `g` (the curriculum start key) returned 0/5.
+
+### 30.4 Diagnosis — the +30 eval is dense-reward hover, not success
+
+`inspect_policy --key g --episodes 2 --max-steps 100`:
+
+```
+ep1: xy 57→82mm,  z 13→54mm,  tilt 2.2°→2.7°,  success: None
+ep2: xy 53→83mm,  z  2→40mm,  tilt 3.2°→2.1°,  success: None
+```
+
+The policy IS state-dependent (different init → different trajectory) — but it monotonically *retreats* in XY while *settling at hover height* in Z. Verifying with the §25 reward weights at the ep1 final pose:
+
+- xy=82.5mm → `r_xy ≈ 0.1` (Gaussian tolerance with 5cm margin decays slowly at 5-8cm out)
+- z=54mm above keyboard ≈ hover height → `r_z ≈ 0.8` (very close to the 5mm bounds)
+- tilt 2.7° → `r_tilt ≈ 0.5`
+- smooth ~0.5 → `r_smooth ≈ 0.5`
+- per-step dense = 0.25·0.1 + 0.15·0.8 + 0.075·0.5 + 0.025·0.5 = **0.170**
+- minus time penalty -0.025 = +0.145 net
+- × 200 steps = **+29 per episode** — matches the +30 training eval exactly.
+
+**The training eval is reading dense-reward hover, not approach success.** No success bonuses are firing.
+
+### 30.5 Why demos didn't fix it
+
+Three layered reasons:
+
+1. **Reward-shape local optimum.** `r_xy`'s Gaussian gradient at 5-8cm distance is tiny; `r_z`'s gradient near hover-height is strong. The agent finds the easier hill (Z) and ignores the harder one (XY). The success bonus (+100) is unreachable from the hover attractor without active XY navigation, which the gradient doesn't promote.
+
+2. **Demo dilution.** 1032 demo transitions vs. a 500k-capacity online buffer = 0.2% of buffer is demos by mid-training. `f` decays 0.5 → 0.25 over 500k steps; at 150k env-steps the demo fraction was ≈0.42. But the demos themselves don't include enough of the "approach" structure — many of the recorded transitions are end-game refinement (last few steps of a successful M1 trajectory), not early approach gradient.
+
+3. **State coverage mismatch.** Demos cover successful M1 trajectories, which use a hand-tuned Jacobian IK. Online experience starts from random poses far from any demo state. The actor sees demo states with high probability during sampling, but its on-policy trajectories never enter demo-state distribution, so the demos provide value for sampled-state behavior but no gradient toward how to *reach* those states.
+
+### 30.6 What this means for the design
+
+The reward function itself is the problem, not RLPD. Demo-bootstrap was the right RLPD fix; it didn't help because **the local optimum is in the dense-reward shape**, not in exploration. Three options going forward:
+
+- **Option A — replace Gaussian tolerance shaping with PBRS.** `approach_potential()` already exists in `rewards.py:226`. PBRS using `Φ = -(xy_dist + 0.5·z_err + 0.05·tilt)` gives constant-magnitude gradient regardless of distance, so the agent always sees XY-closing gradient. Policy-invariant by construction.
+- **Option B — boost xy weight and shrink z weight.** Make r_xy dominate. Cheap test: APPROACH_W_XY=0.6, APPROACH_W_Z=0.05. Doesn't fix the gradient-magnitude issue, but tilts the local optimum toward XY-focused policies.
+- **Option C — sparse reward + larger demo set.** Drop dense shaping entirely; rely on demos + success bonus + PBRS only. Riskier and slower but doesn't suffer from local-optimum drag.
+
+Option A is the cleanest fix and cheap to try — flip a flag in `rewards.py`, re-train 200k steps, re-eval. Likely the next step.
+
+### 30.7 Lessons (extending §29.6)
+
+- **eval_return is a misleading proxy when dense reward has a strong local optimum.** A high eval_return tells you the agent is collecting reward, not that it's solving the task. Always cross-check with `inspect_policy` on canonical keys *before* drawing conclusions from training-eval alone.
+- **Gaussian tolerance shaping is dangerous on multi-dimensional approach tasks.** Different dimensions have different "natural distances" from the target, so each `r_*` term enters its strong-gradient region at a different time. The agent learns whichever one is easiest first and gets stuck there.
+- **The peak eval of +39.67 at step 160k was diagnostic noise**, not progress — it just means a slightly different hover policy gave slightly more dense reward on that particular eval batch.
