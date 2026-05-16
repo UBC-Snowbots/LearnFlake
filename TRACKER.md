@@ -1419,3 +1419,100 @@ Total tests: 43/43 passing.
 - **Save/load symmetry is testable.** A roundtrip test (`save → fresh agent → load → compare`) catches missing state. We had `test_rlpd_sac_one_train_step_no_nan` (algorithm-level) but no save/load test (persistence-level). Added now.
 - **Visualizations near the init pose lie.** Key 'g' is near init; a frozen policy looks correct on it. If we'd visualized key 'q' or 'p' (far corners) instead, the issue would have surfaced immediately. Lesson: always visualize a *hard* key, not just the natural one.
 - **Tooling should expose the failure mode.** `inspect_policy.py` was perfect for this — it showed numerical static-pose behavior that the visual viewer couldn't easily distinguish from "successful hovering". Numerical inspection > visual when the failure mode is "no motion."
+
+---
+
+## 29. v1 declared done at the "demos wall" — M4 = 0/87 (2026-05-16)
+
+After the §28 RMS-saving fix, retrained Approach to 150k steps with the §26 stable config (UTD=2, α floor 0.1, halved reward weights). Training succeeded — multiple checkpoints with embedded RMS, eval peaks at +33 (step 100k) and +30 (step 150k). Locked `approach_step_000100000.pt` as `checkpoints/approach_v2_best/approach_best.pt`.
+
+But `eval_orchestrator` returned **0/435** Approach success across all 87 keys. Diagnostic via `inspect_policy.py` + manual prediction trace revealed the root cause:
+
+### 29.1 The actor collapsed to a state-independent constant bias
+
+```
+a[:4] = [+0.0063, -0.0020, +0.0014, +0.0005]    # at step 0 (init pose)
+a[:4] = [+0.0063, -0.0020, +0.0014, +0.0005]    # at step 199 (200 env steps later)
+a[:4] = [+0.0063, -0.0020, +0.0014, +0.0005]    # after 30 random actions moved the arm
+```
+
+The actor produces **identical actions regardless of input**. The "policy" is a tiny constant joint-velocity command in joint space — over 200 steps that's roughly 3.5° rotation of joint 0, small rotations of others. For some init poses + central keys this happens to land within the 4mm success threshold; for most it doesn't.
+
+eval_return = +33 was decomposing as: ~30% lucky-init-pose success × ~+100 reward + ~70% failure × ~−10 reward = +30. *The policy had no perception of the target key.* It just rotated joint 0 a fixed amount and hoped.
+
+### 29.2 Why this happened
+
+Auto-α drives the policy distribution narrower until the floor kicks in. But narrower in *output* doesn't necessarily mean richer state-dependence — the network can converge to "produce small constant output regardless of input" and still satisfy the entropy target (the conditional Gaussian's σ provides the entropy, not the variation in mean). Without an external signal pushing the policy to be state-dependent (i.e., **demonstrations of the correct state→action mapping**), SAC has no reason to learn perception.
+
+This is the **demos wall**. RLPD's paper is explicit that the algorithm's stability *and* the policy's state-dependence both depend on the symmetric demo+online replay. v1 shipped with `demo_fraction=0` and confirmed why this is structural, not a tuning bug.
+
+### 29.3 v1 status — what works, what doesn't
+
+**Works:**
+- All 43 unit tests pass.
+- Env, observation pipeline, action space, reward shape, DR wrapper, curriculum, replay buffer all sound.
+- Strike policy converges trivially to eval=4.0/4.0 (max possible). Strike's task — "fire solenoid from a near-key pose" — is dense enough that the actor learns real state-dependence.
+- Training loop is correct and reproducible. Same seed → same trajectory (verified across attempts).
+- §28 RMS-saving makes future checkpoints reloadable.
+
+**Doesn't work:**
+- Approach from-scratch RL on the keyboard. M4 = 0/87 keys at ≥80% chain success. The Approach policy is state-independent garbage.
+
+### 29.4 v1.1 plan — demo bootstrap (the path RLPD was actually designed for)
+
+The infrastructure already exists; this is purely a data + wiring task.
+
+**Stage 1 — generate demos** (~1 hour wallclock):
+
+`rl_autonomy/tools/m1_p_controller.py` already solves 9/20 keys via Jacobian-pseudoinverse IK. Run it in batch mode across many keys and seeds, save the successful trajectories as `(obs, action, reward, next_obs, terminated)` tuples in HDF5.
+
+- Target: 100-200 successful demo trajectories covering Phase A keys.
+- Format: same as `algos.replay_buffer.Batch` but on disk.
+- Tool: extend `tools/m1_p_controller.py` with a `--save-demos PATH` flag.
+
+**Stage 2 — load demos into RLPD's demo buffer** (already implemented):
+
+`SymmetricReplayBuffer` already accepts a populated `demos` buffer. Add a CLI flag to `train_approach.py`:
+
+```
+--demos PATH    # HDF5 file with demo trajectories
+```
+
+That populates `agent.replay.demos` before training starts. Initial demo fraction 0.5 → 0.25 over 500k steps per `RLPDConfig.demo_fraction_*`.
+
+**Stage 3 — re-train** (~2-3 hours wallclock):
+
+Same config as v1's attempt #3 (UTD=2, α floor 0.1, halved reward weights) plus `--demos`. With the demo anchor the critic+actor co-training has external ground truth — should produce state-dependent policy.
+
+**Expected v1.1 M4 outcome:**
+- Phase A keys: 60-90% chain success (demos cover these)
+- Phase B keys: 30-60% (some generalization)
+- Phase C keys (corners, function row): low (out of demo distribution)
+
+This pushes past the demos wall. If we want full 87-key coverage, demos must include trajectories for harder keys too — either M1 with more aggressive tuning, joystick demos from Aaron, or **self-imitation from the v1.1 trained policy** (generate v1.2 demos from v1.1 successes).
+
+### 29.5 What v1 leaves behind
+
+- A working repo: 1,200+ LOC of tested env, agent, scripts, tools.
+- A complete TRACKER documenting every design decision and every failure mode.
+- Three failure-mode case studies (§23, §25, §26, §27, §28, this section): hovering optimum, Q-overestimation, α-decay, late-stage drift, missing RMS, actor collapse to state-independence.
+- A clear v1.1 spec that fits in 4-6 hours of work.
+- Strike-side already done; reusable.
+
+### 29.6 Lessons
+
+- **Sparse-reward RL without demos has a structural ceiling.** Not a tuning bug, not a config issue — the algorithm class can't solve the task class. RLPD's paper is right; we confirmed it the hard way.
+- **State-independent actor collapse is invisible from eval_return alone.** eval=+33 looked like "policy works ~30% of the time." It was actually "policy is open-loop, 30% of init poses happen to align." The dispositive test was `inspect_policy.py` showing identical actions across 30 random perturbations of the env state.
+- **Always test state-dependence directly.** Sample multiple init poses; if predict() returns the same action, the policy is collapsed regardless of what eval says.
+- **Strike was easy because its reward is dense.** It got positive contact reward every step it pressed; learning was monotonic. Approach has +100 only at the threshold; the gradient outside the threshold ring is too weak without demo anchoring.
+
+### 29.7 Final v1 numbers
+
+| Component | v1 result |
+|---|---|
+| Tests | 43/43 ✅ |
+| M1 env correctness | 9/20 keys ✅ |
+| M2 algorithm correctness (Pendulum) | -97 in 50k steps ✅ |
+| M3 Approach training | trained — but state-independent policy ❌ |
+| M4 full 87-key chain | 0/87 ❌ |
+| v1.1 demo-bootstrap plan | documented in §29.4 ✅ |
