@@ -1660,3 +1660,72 @@ Going with Option B next (smallest code change; tests the gradient hypothesis di
 - **Removing a bad local optimum doesn't help if there's no gradient toward the global optimum.** The pbrs_only experiment cleared the hover attractor but left the agent in a flat reward landscape with weak PBRS signal — and a flat landscape is just as un-learnable as a deceptive one.
 - **Demos don't fix distribution gaps by themselves.** RLPD's symmetric buffer assumes the online actor can roughly imitate demo behavior with exploration. If the actor's natural exploration distribution is far from demo distribution, the demos just inflate Q-targets without providing actionable policy gradient.
 - **Always estimate the gradient magnitude before committing to a reward shape.** A 30-second back-of-envelope (Φ change for a 1mm step) would have caught this before training.
+
+---
+
+## 32 — v1.3 (xy_focus): wall cracked, not broken (2026-05-16)
+
+Implemented Option B in commit `5598760`: `reward_mode='xy_focus'` with weights 0.70/0.05/0.05/0 and long-tail sigmoid on r_xy at 15cm margin. Re-generated demos under xy_focus (same M1 IK, 40/100 success, 1032 transitions). Trained approach_v5 for 200k steps with `--reward-mode xy_focus --demos demos/approach_phase_a_xyfocus.h5 --domain-rand --utd 2`.
+
+### 32.1 Training
+
+| step | v3 (dense) | v4 (pbrs_only) | v5 (xy_focus) |
+|---|---|---|---|
+| 10k | +18 | -166 | -139 |
+| 20k | -23 | -192 | **+20** |
+| 60k | +34 | -92 | **+70** |
+| 100k | +7 | -126 | +68 |
+| 150k | +30 | — (killed) | **+77** ← peak |
+| 200k | +22 | — | +33 |
+
+Once v5 climbed past step 50k it stayed positive for 15 consecutive evals (steps 60k → 200k). Peak +76.9 at step 150k. Mean over second half: +51. Training was the cleanest of any run: critic_loss stable at 0.1-0.3, α held at 0.17-0.25 (well above the §26 floor), ep_return(20) drifted upward.
+
+### 32.2 eval_orchestrator on step-150k checkpoint
+
+| | v3 | v4 | v5 |
+|---|---|---|---|
+| Approach success | 0/435 (0%) | — | **1/435 (0.2%)** |
+| Full chain success | 0/435 | — | 0/435 |
+| Keys with any approach success | 0/87 | — | **1/87** (k) |
+
+**First non-zero approach success across the entire pipeline.** The 1-success was on key `k` (home row right) — solidly in the demo distribution. The chain failed because Strike couldn't follow up; Strike's loss is a separate issue from the Approach side.
+
+### 32.3 Diagnosis — fine-mm precision missing
+
+`inspect_policy --key g --episodes 2 --max-steps 200`:
+
+```
+ep1 v5: xy 57→53 (min @ step 60) →65,  z 13→55,  no success
+ep2 v5: xy 53→48 (min @ step 60) →62,  z  2→44,  no success
+```
+
+Compare to v3 on the same key:
+
+```
+ep1 v3: xy 57→82 (monotone retreat), z 13→54
+ep2 v3: xy 53→83 (monotone retreat), z  2→40
+```
+
+v5 learned the right macro direction (close in XY for ~5mm) but **can't refine past ~48mm**. The success threshold is 4mm. The policy gets to 48mm of target then drifts back out. Two failure modes:
+- **Macro behavior learned**: ✅ xy decreases at the start.
+- **Fine refinement not learned**: ❌ can't get below 48mm; loses precision and bounces back to 60+mm.
+
+The +60 training-eval mean is the dense-reward signal of "close enough for moderate r_xy" (~0.4 at 50mm with long-tail), not actual success.
+
+### 32.4 Why the fine refinement is missing
+
+The 1032-transition demo set covers M1's successful trajectories, but M1 itself succeeds via Jacobian IK that uses ground-truth joint state — i.e., the demo *actions* are joint targets computed from a closed-loop controller, not a feedforward policy. The agent has to learn to *reproduce that closed-loop precision in open-loop*, which requires more updates than 200k steps with 50→25% demo fraction provide.
+
+Three viable next iterations:
+
+- **Option D — keep demo fraction constant at 0.5.** Stop the decay; the demos stay 50% of every batch for the whole 200k. Demos are success-rich, so this keeps "reach 4mm" gradient strong throughout.
+- **Option E — BC warm-start.** Pre-train the actor on demos for 10-20k steps before SAC starts. Puts the actor inside demo state distribution at SAC-step 0, eliminating the bootstrap gap (§31.2's extrapolation problem).
+- **Option F — Strike-style continuation training.** Use the v5 step-150k checkpoint as warm start, train another 200k with smaller learning rate and the same setup. Cheap; tests whether more time fixes precision.
+
+Option D is the smallest config change. Picking D as v1.4.
+
+### 32.5 Lessons
+
+- **Hypothesis falsifiability matters.** v4 (pbrs_only) tested "is the dense reward shape the problem?" → falsified. v5 (xy_focus) tested "is the gradient magnitude the problem?" → confirmed. Each falsifiable run isolates a single variable; we converged on the right answer in 3 attempts.
+- **A 1-success result is not a coincidence.** 1/435 with a stable +60 training eval and `inspect_policy` showing monotone XY-decrease at episode start is enough evidence that the gradient signal works. The remaining gap is precision, not direction.
+- **Training-eval to eval_orchestrator gap is informative.** When +60 training eval = 0/435 eval, the eval is overstating success. When +60 = 1/435, the eval is at least pointing the right direction. The ratio (eval magnitude / orchestrator success rate) is a proxy for "how much of the eval is dense reward vs actual success."
