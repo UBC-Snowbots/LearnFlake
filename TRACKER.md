@@ -1729,3 +1729,56 @@ Option D is the smallest config change. Picking D as v1.4.
 - **Hypothesis falsifiability matters.** v4 (pbrs_only) tested "is the dense reward shape the problem?" → falsified. v5 (xy_focus) tested "is the gradient magnitude the problem?" → confirmed. Each falsifiable run isolates a single variable; we converged on the right answer in 3 attempts.
 - **A 1-success result is not a coincidence.** 1/435 with a stable +60 training eval and `inspect_policy` showing monotone XY-decrease at episode start is enough evidence that the gradient signal works. The remaining gap is precision, not direction.
 - **Training-eval to eval_orchestrator gap is informative.** When +60 training eval = 0/435 eval, the eval is overstating success. When +60 = 1/435, the eval is at least pointing the right direction. The ratio (eval magnitude / orchestrator success rate) is a proxy for "how much of the eval is dense reward vs actual success."
+
+---
+
+## 33 — v1.4 / v1.5 / pure BC sweep (2026-05-16)
+
+### 33.1 Five back-to-back attempts past the 1/435 wall
+
+| Run | Setup | Train-eval peak | Best M4 (Approach / chain) |
+|---|---|---|---|
+| v5 | xy_focus, demo 50→25% | +76.9 @ 150k | 1/435 / 0/435 |
+| v6 | xy_focus, demo const 50% | +77.8 @ 80k | 1/435 / 0/435 |
+| v7 step 100k | + BC warm-start 200 epochs, then 100k SAC | +68 | 0/435 / 0/435 |
+| v7 **step 25k** | + BC + only 20k SAC | +27 | **4/435** / 0/435 |
+| v7 step 75k | + BC + 70k SAC | +50 | 0/435 / 0/435 |
+| **v8 pure BC** | 500 epochs BC, 0 gradient steps | +9 (5-ep eval) | **10/435 (2.3%)** / 0/435 |
+
+The v7 sweep revealed the pattern: BC right after pretrain gave 4/435 at step 25k (4× v5/v6), then SAC degraded it monotonically — 0/435 by step 75k. Removed SAC entirely → 10/435.
+
+**Conclusion: SAC is actively erasing the BC-fitted policy.** The dense reward landscape (even with xy_focus's improvements) and the actor's exploration noise are pulling the actor away from demo behavior faster than the demos can re-anchor it.
+
+### 33.2 Per-key breakdown — v8 pure BC
+
+| key | Approach success |
+|---|---|
+| **j** | **4/5 (80%)** |
+| 5, t, o, p, h, k | 1/5 each |
+| all others (80 keys) | 0/5 |
+
+Key `j` is the home-row right-hand index — the easiest key for M1 (deepest joint workspace) and the most-trained in demos. BC fits it almost perfectly. The pattern: BC produces strong per-key performance when demos cover the key densely; it fails entirely on keys outside M1's success set.
+
+### 33.3 Why pure BC won
+
+- M1 demos = 1032 transitions, ~26 transitions per successful episode, 40 successful episodes across 9-ish keys.
+- BC objective is "match demo action given demo state" — a direct supervised problem.
+- SAC objective is "maximize discounted return under exploration" — exploration noise is large compared to the precision demands (4mm threshold).
+- For a sparse-success task with a small high-quality demo set, the offline-style BC objective dominates. SAC's value added (discovering new policies) is negative when exploration can't find better trajectories than M1 already provides.
+
+This is consistent with the offline-RL literature: when demos are high-quality and the task is sparse, **pure supervised imitation often beats online RL** unless you have a way to constrain the actor (CQL, IQL, AWAC). RLPD's exact mechanism (50/50 batch + Q-anchoring) was designed for cases where online RL discovers better policies than demos — that assumption fails here.
+
+### 33.4 What this means going forward
+
+Two viable paths to push past 10/435:
+
+- **Path 1 — expand demo coverage.** M1 succeeds on ~9 unique keys × 40% rate. If we generate 20× more demos (200+ episodes × all 87 keys = 17k attempts → ~80 unique-key demos), BC has data to fit more keys. Bottleneck: M1's own success rate at edge keys.
+- **Path 2 — constrained offline RL.** Replace SAC with CQL or IQL. These offline algorithms have explicit anti-extrapolation regularizers; they can refine BC without eroding it. Much more code (CQL is ~300 LOC).
+
+Path 1 is the smallest change with the biggest expected gain. Run gen_demos with --trials-per-key 30 across all 87 keys, then re-do pure BC.
+
+### 33.5 Lessons (extending §32.5)
+
+- **Validate from a checkpoint right after pretrain.** v7 step 25k vs step 100k vs step 175k revealed that SAC erodes BC monotonically. Always eval the post-BC actor before letting RL touch it.
+- **The +30 to +70 training eval signal is dense reward, not success.** Across v5/v6/v7, training eval = +60 corresponded to wildly different orchestrator results (1/435 to 0/435). Trust orchestrator success, not training eval.
+- **When BC outperforms RL+BC, the demos are doing the actual learning and SAC is adding noise.** This is the signature of an oversampled-actor problem — the SAC exploration radius is wider than the success basin, so any exploration step moves out of the basin.
