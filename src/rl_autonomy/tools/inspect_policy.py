@@ -44,6 +44,11 @@ def main() -> int:
     agent.load(str(args.checkpoint))
     print(f"[inspect] loaded {args.checkpoint}")
     print(f"[inspect] agent env_steps={agent._env_steps}  gradient_steps={agent._gradient_steps}")
+    # Orphan-checkpoint workaround per TRACKER §28: checkpoints saved before
+    # the RMS-persistence fix produce a frozen policy at eval time. Warm up.
+    if not agent.has_rms():
+        print(f"[inspect] no RMS in checkpoint → warming up via 5000 random-action steps")
+        agent.warm_up_env_rms(n_steps=5000, action_source="random")
     print()
 
     for ep in range(args.episodes):

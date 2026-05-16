@@ -1,28 +1,44 @@
 #!/bin/bash
-# Quick status snapshot for the M3 Approach training run.
-# Run from host: ./scripts/training_status.sh
-# Run inside container: bash /LearnFlake/scripts/training_status.sh
-
+# Quick status snapshot for any v1 training run.
+#
+# Usage:
+#   ./scripts/training_status.sh              # default: approach_v1
+#   ./scripts/training_status.sh strike_v1    # check Strike
+#   ./scripts/training_status.sh approach_v1_attempt2   # any archived run
+#
+# Works from host or from inside the rover_gpu container.
 set -u
-LOG="/home/arhim/Documents/rover/LearnFlake/logs/approach_v1/train.log"
-CKPT_DIR="/home/arhim/Documents/rover/LearnFlake/checkpoints/approach_v1"
 
+RUN="${1:-approach_v1}"
+
+# Match the python process name based on the run prefix
+case "$RUN" in
+    approach*) PROC_PAT="train_approach" ;;
+    strike*)   PROC_PAT="train_strike"   ;;
+    *)         PROC_PAT="train_$(echo "$RUN" | cut -d_ -f1)" ;;
+esac
+
+# Path resolution: host vs container
 if [[ -f /.dockerenv ]]; then
-    LOG="/LearnFlake/logs/approach_v1/train.log"
-    CKPT_DIR="/LearnFlake/checkpoints/approach_v1"
+    REPO="/LearnFlake"
+else
+    REPO="/home/arhim/Documents/rover/LearnFlake"
 fi
+LOG="$REPO/logs/$RUN/train.log"
+CKPT_DIR="$REPO/checkpoints/$RUN"
 
-echo "=== M3 Approach training status ==="
+echo "=== ${RUN} training status ==="
 echo "log:  $LOG"
 echo "ckpt: $CKPT_DIR"
 echo
 
 # 1. Is the python process alive?
-if pgrep -f 'train_approach' > /dev/null 2>&1; then
-    echo "[proc] training process: ALIVE"
-    echo "  $(ps -ef | grep train_approach | grep -v grep | awk '{print "  pid="$2"  cpu="$3"%  mem="$4"%  elapsed="$NF}')"
+if pgrep -f "$PROC_PAT" > /dev/null 2>&1; then
+    echo "[proc] training process ($PROC_PAT): ALIVE"
+    ps -ef | grep "$PROC_PAT" | grep -v grep | awk '{print "  pid="$2"  cpu="$3"%  mem="$4"%  elapsed="$NF}'
 else
-    echo "[proc] training process: NOT FOUND (might be on host shell — check rover_gpu container)"
+    echo "[proc] training process ($PROC_PAT): NOT FOUND"
+    echo "       (run might be finished, or you might need to check inside rover_gpu)"
 fi
 
 # 2. nvidia-smi quick
@@ -41,13 +57,23 @@ if [[ -f "$LOG" ]]; then
     echo "[log] last eval:"
     grep 'eval_return=' "$LOG" | tail -1 | sed 's/^/  /' || echo "  (no eval lines yet)"
     echo
-    echo "[log] curriculum:"
-    grep -E 'curriculum advanced|curriculum reached' "$LOG" | tail -3 | sed 's/^/  /' || echo "  (no curriculum events yet)"
+    echo "[log] eval trajectory (all):"
+    grep 'eval_return=' "$LOG" | sed 's/^/  /' || echo "  (none yet)"
     echo
-    if grep -qE 'Traceback|RuntimeError|Killed|nan' "$LOG"; then
-        echo "[log] WARNINGS — last 3:"
-        grep -E 'Traceback|RuntimeError|Killed|nan' "$LOG" | tail -3 | sed 's/^/  /'
+    cur_evt=$(grep -E 'curriculum advanced|curriculum reached' "$LOG" | tail -3)
+    if [[ -n "$cur_evt" ]]; then
+        echo "[log] curriculum:"
+        echo "$cur_evt" | sed 's/^/  /'
+        echo
     fi
+    # Real post-warmup nan only (not the early warmstart formatting)
+    nan_lines=$(grep -E 'Traceback|RuntimeError|Killed' "$LOG" || true)
+    if [[ -n "$nan_lines" ]]; then
+        echo "[log] CRASHES:"
+        echo "$nan_lines" | tail -3 | sed 's/^/  /'
+    fi
+else
+    echo "[log] LOG NOT FOUND at $LOG"
 fi
 
 # 4. Checkpoint count
@@ -55,7 +81,7 @@ if [[ -d "$CKPT_DIR" ]]; then
     n=$(ls -1 "$CKPT_DIR"/*.pt 2>/dev/null | wc -l)
     echo
     echo "[ckpt] $n checkpoint(s):"
-    ls -lh "$CKPT_DIR"/*.pt 2>/dev/null | awk '{print "  "$NF, "("$5")"}' | tail -5 || echo "  (no checkpoints yet)"
+    ls -lh "$CKPT_DIR"/*.pt 2>/dev/null | awk '{print "  "$NF, "("$5")"}' | tail -6 || echo "  (no checkpoints yet)"
 fi
 
 # 5. Wallclock summary

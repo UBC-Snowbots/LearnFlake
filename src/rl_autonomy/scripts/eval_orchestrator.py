@@ -34,9 +34,18 @@ from rl_autonomy.envs import KeyboardEnv, make_env
 from rl_autonomy.envs.keyboard_layout import AVAILABLE_KEYS
 
 
-def _build_agent(env, ckpt_path: str, device: str | None) -> RLPDSAC:
+def _build_agent(env, ckpt_path: str, device: str | None,
+                 warmup_steps: int = 5000) -> RLPDSAC:
     agent = RLPDSAC(env=env, config=RLPDConfig(), device=device)
     agent.load(ckpt_path)
+    # Orphan-checkpoint workaround (TRACKER §28): pre-§28 checkpoints don't
+    # contain the RMS state. Without it the policy receives unnormalized
+    # observations it was never trained on and freezes. Detect missing RMS
+    # and warm it up with random actions before the per-key eval loop.
+    if not agent.has_rms():
+        print(f"[eval] {ckpt_path}: no RMS in checkpoint → warming up via "
+              f"{warmup_steps} random-action steps", flush=True)
+        agent.warm_up_env_rms(n_steps=warmup_steps, action_source="random")
     return agent
 
 

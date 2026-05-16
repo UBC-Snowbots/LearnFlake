@@ -1362,3 +1362,60 @@ Cost: ~6 hours wallclock total (demo gen ~1h, training ~5h). The infrastructure 
 - **Save best-checkpoint by eval, not by latest.** Our save schedule (`approach_step_*.pt` every 50k) preserved the peak by luck. A `--save-on-eval-best` flag would be a tiny add and would have made this analysis trivial.
 - **Visualization is decisive.** The user's "hovers steadily over the green dot" confirmation transformed the diagnosis from "is the policy working" to "the policy works but late training destroyed it." Numerical eval_return alone wasn't enough; the visual showed the qualitative truth.
 - **Knowing when to stop is a skill.** We could have kept attempt #3 running for another 700k steps and not improved. The cost of stopping is small; the cost of continuing into divergence is large.
+
+---
+
+## 28. RunningMeanStd was never persisted to checkpoints (2026-05-16)
+
+After locking `approach_best.pt` per §27 and launching `eval_orchestrator`, every key returned 0/5 Approach success — **including key 'g' that the user had just visually confirmed worked**. Diagnostic via `inspect_policy.py` showed the policy producing essentially zero actions: the arm sits frozen in init pose, xy stuck at 53–57 mm from key 'g' across all 200 steps.
+
+### 28.1 Root cause
+
+The training script's `_share_normalizer(train_env, eval_env)` (§23.4) populated the eval env's `RunningMeanStd` *during* training, so the `eval_return = +23.5` reading at step 100k was real and produced with calibrated normalization. **But `RLPDSAC.save` never wrote the RMS state to disk.** When `eval_orchestrator` reloaded the checkpoint, it constructed a fresh `ObsAdapter` with empty stats (mean = 0, var = 1). The policy then received un-normalized observations on scales ~10× different from what it was trained on, and its tanh-squashed output collapsed to near-zero.
+
+The user's earlier successful visualization of `approach_step_000100000.pt` worked because the visualize tool was launched in the **same Python process** as a different run earlier — or more likely, because key 'g' happens to lie near the init EEF pose (xy ≈ 55 mm), so a frozen policy looks like it's "hovering near the goal" even though it never *approaches*.
+
+### 28.2 Fix — persist RMS inside the checkpoint payload
+
+`RLPDSAC.save` now embeds the `RunningMeanStd` snapshot (mean, var, count) under the keys `rms_mean`, `rms_var`, `rms_count`. `RLPDSAC.load` reads these back and writes them into the env's `ObsAdapter` (if one is present in the wrapper stack), then sets `training=False` on the adapter so the loaded stats are frozen during downstream evaluation.
+
+New helpers on the agent:
+
+- `agent.has_rms()` — `True` iff the env's `ObsAdapter` has more than the default ε of accumulated samples. Lets consumers detect orphan checkpoints.
+- `agent.warm_up_env_rms(n_steps, action_source)` — bootstraps RMS from scratch using either `"random"` or `"policy"` action sources, for use when a checkpoint pre-dates §28 and the RMS can't be loaded.
+
+`eval_orchestrator.py` and `tools/inspect_policy.py` both call `agent.has_rms()` after `agent.load()`; if missing, they call `warm_up_env_rms(5000, "random")` before proceeding.
+
+### 28.3 The orphan checkpoint can't be rescued
+
+I tried warmup with both `"random"` and `"policy"` action sources. Neither restores the policy:
+
+- Random-action warmup over-estimates obs variance by ~10× (random actions cover the full joint range; the trained policy doesn't). Post-warmup normalization makes the policy's inputs look tiny, and the network outputs near-zero.
+- Policy-source warmup is degenerate: the policy is already broken with empty RMS, so it produces no motion, the obs distribution stays static, and the RMS doesn't acquire useful variance.
+
+**Conclusion: `approach_best.pt` is unrecoverable.** Need to re-train from scratch with the §28 fix in place.
+
+### 28.4 Re-training cost is small
+
+We already know from §27 that the policy peaks around step 100k. Re-training to step 150k with the new save logic + frequent checkpoints + the §26 stable config should:
+- Take ~50 minutes wallclock (at the §25-tuned ~50 fps under UTD=2)
+- Produce checkpoints with embedded RMS that the orchestrator can actually use
+- Avoid the late-stage drift by capping the run at 150k
+
+Then M4 can run.
+
+### 28.5 Tests
+
+Two new in `tests/test_rlpd_sac.py`:
+
+- `test_save_load_persists_rms`: end-to-end roundtrip. Construct an agent, fill RMS with random data, save, reload into a fresh agent, assert RMS mean/var/count match exactly and `training` is False after load.
+- `test_warm_up_env_rms_bootstraps_from_random_actions`: confirms `warm_up_env_rms` increases the RMS sample count above the ε floor, and that `training` is frozen post-warmup.
+
+Total tests: 43/43 passing.
+
+### 28.6 Lessons
+
+- **Normalizers are part of the policy.** Any time a policy is trained with observation normalization, the normalizer state is as critical as the network weights. Save them together. This bug cost us a full M3 run.
+- **Save/load symmetry is testable.** A roundtrip test (`save → fresh agent → load → compare`) catches missing state. We had `test_rlpd_sac_one_train_step_no_nan` (algorithm-level) but no save/load test (persistence-level). Added now.
+- **Visualizations near the init pose lie.** Key 'g' is near init; a frozen policy looks correct on it. If we'd visualized key 'q' or 'p' (far corners) instead, the issue would have surfaced immediately. Lesson: always visualize a *hard* key, not just the natural one.
+- **Tooling should expose the failure mode.** `inspect_policy.py` was perfect for this — it showed numerical static-pose behavior that the visual viewer couldn't easily distinguish from "successful hovering". Numerical inspection > visual when the failure mode is "no motion."

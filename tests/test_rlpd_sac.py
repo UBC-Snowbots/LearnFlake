@@ -206,6 +206,111 @@ def test_min_alpha_floor_enforced():
     env.close()
 
 
+def test_save_load_persists_rms():
+    """TRACKER §28: checkpoint roundtrip must restore the env's RMS state."""
+    from rl_autonomy.algos import RLPDSAC, RLPDConfig
+    from rl_autonomy.envs.normalizer import RunningMeanStd
+    import tempfile, os
+
+    class _DictBoxWithObsAdapter(gym.Wrapper):
+        """Synthetic stack: gym env + a real ObsAdapter so the RMS path is exercised."""
+        def __init__(self, env):
+            super().__init__(env)
+            from rl_autonomy.envs.obs_adapter import ObsAdapter
+            self.observation_space = gym.spaces.Dict({
+                "actor": env.observation_space,
+                "critic": env.observation_space,
+            })
+            # Wrap inner-most: gym -> DictBoxWithObsAdapter (this) -> ObsAdapter
+            # Note: ObsAdapter expects Dict({'actor', 'critic'}) — which we just made above.
+        def reset(self, **kw):
+            o, i = self.env.reset(**kw)
+            return {"actor": o.astype(np.float32), "critic": o.astype(np.float32)}, i
+        def step(self, a):
+            o, r, t, tr, i = self.env.step(a)
+            return {"actor": o.astype(np.float32), "critic": o.astype(np.float32)}, r, t, tr, i
+
+    from rl_autonomy.envs.obs_adapter import ObsAdapter
+    inner = _DictBoxWithObsAdapter(gym.make("Pendulum-v1"))
+    env_with_oa = ObsAdapter(inner, training=True)
+
+    cfg = RLPDConfig(update_to_data=1, warmstart_steps=5, batch_size=4, buffer_size=20,
+                     demo_buffer_size=1, demo_fraction_init=0.0, demo_fraction_final=0.0,
+                     actor_hidden=(8,), critic_hidden=(8,))
+    agent = RLPDSAC(env=env_with_oa, config=cfg, device="cpu")
+
+    # Populate RMS with a few obs samples
+    obs, _ = env_with_oa.reset()
+    for _ in range(10):
+        a = env_with_oa.action_space.sample()
+        obs, _, t, tr, _ = env_with_oa.step(a)
+        if t or tr:
+            obs, _ = env_with_oa.reset()
+
+    rms_mean_before = env_with_oa.rms.mean.copy()
+    rms_var_before = env_with_oa.rms.var.copy()
+    rms_count_before = env_with_oa.rms.count
+
+    # Save + load on a fresh agent + fresh env
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "ckpt.pt")
+        agent.save(path)
+
+        # New agent + new env with a fresh empty RMS
+        inner2 = _DictBoxWithObsAdapter(gym.make("Pendulum-v1"))
+        env2 = ObsAdapter(inner2, training=True)
+        agent2 = RLPDSAC(env=env2, config=cfg, device="cpu")
+        # Confirm RMS is empty before load
+        assert env2.rms.count <= 1e-3 + 1e-4  # default epsilon
+        agent2.load(path)
+
+        # After load, RMS should match the saved one
+        assert np.allclose(env2.rms.mean, rms_mean_before)
+        assert np.allclose(env2.rms.var, rms_var_before)
+        assert env2.rms.count == pytest.approx(rms_count_before)
+        # And training should be disabled (frozen stats)
+        assert env2.training is False
+        # has_rms() should now return True
+        assert agent2.has_rms()
+
+
+def test_warm_up_env_rms_bootstraps_from_random_actions():
+    """For checkpoints saved before §28's RMS persistence, warm_up_env_rms()
+    must bring the RMS count well above the default epsilon by running
+    random actions through the env."""
+    from rl_autonomy.algos import RLPDSAC, RLPDConfig
+    from rl_autonomy.envs.obs_adapter import ObsAdapter
+
+    class _DictBoxWithObsAdapter(gym.Wrapper):
+        def __init__(self, env):
+            super().__init__(env)
+            self.observation_space = gym.spaces.Dict({
+                "actor": env.observation_space,
+                "critic": env.observation_space,
+            })
+        def reset(self, **kw):
+            o, i = self.env.reset(**kw)
+            return {"actor": o.astype(np.float32), "critic": o.astype(np.float32)}, i
+        def step(self, a):
+            o, r, t, tr, i = self.env.step(a)
+            return {"actor": o.astype(np.float32), "critic": o.astype(np.float32)}, r, t, tr, i
+
+    inner = _DictBoxWithObsAdapter(gym.make("Pendulum-v1"))
+    env = ObsAdapter(inner, training=True)
+    cfg = RLPDConfig(update_to_data=1, warmstart_steps=5, batch_size=4, buffer_size=20,
+                     demo_buffer_size=1, demo_fraction_init=0.0, demo_fraction_final=0.0,
+                     actor_hidden=(8,), critic_hidden=(8,))
+    agent = RLPDSAC(env=env, config=cfg, device="cpu")
+
+    assert not agent.has_rms()
+    agent.warm_up_env_rms(n_steps=200, action_source="random")
+    assert agent.has_rms()
+    # RMS should be frozen after warmup
+    assert env.training is False
+    # RMS should have non-trivial variance (random actions = wide obs range)
+    assert env.rms.count > 200 - 1
+
+
 def test_min_alpha_zero_disables_floor():
     """min_alpha=0 should be equivalent to vanilla SAC (no floor)."""
     from rl_autonomy.algos import RLPDSAC, RLPDConfig

@@ -447,24 +447,37 @@ class RLPDSAC:
     # ------------------------------------------------------------------
 
     def save(self, path: str) -> None:
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        torch.save(
-            {
-                "actor": self.actor.state_dict(),
-                "critic": self.critic.state_dict(),
-                "critic_target": self.critic_target.state_dict(),
-                "log_alpha": self.log_alpha.detach().cpu().numpy(),
-                "actor_opt": self.actor_opt.state_dict(),
-                "critic_opt": self.critic_opt.state_dict(),
-                "temp_opt": self.temp_opt.state_dict(),
-                "config": self.cfg.__dict__,
-                "env_steps": self._env_steps,
-                "gradient_steps": self._gradient_steps,
-            },
-            path,
-        )
+        """Save weights + opts + counters + the env's RunningMeanStd state.
 
-    def load(self, path: str) -> None:
+        The RMS state is crucial: the policy was trained on normalized
+        observations, and reloading without the RMS gives the actor obs
+        on a different scale than what it learned. Symptom: policy outputs
+        near-zero actions, arm freezes. See TRACKER §28.
+        """
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        payload = {
+            "actor": self.actor.state_dict(),
+            "critic": self.critic.state_dict(),
+            "critic_target": self.critic_target.state_dict(),
+            "log_alpha": self.log_alpha.detach().cpu().numpy(),
+            "actor_opt": self.actor_opt.state_dict(),
+            "critic_opt": self.critic_opt.state_dict(),
+            "temp_opt": self.temp_opt.state_dict(),
+            "config": self.cfg.__dict__,
+            "env_steps": self._env_steps,
+            "gradient_steps": self._gradient_steps,
+        }
+        rms_state = self._extract_env_rms()
+        if rms_state is not None:
+            payload["rms_mean"] = rms_state["mean"]
+            payload["rms_var"] = rms_state["var"]
+            payload["rms_count"] = rms_state["count"]
+        torch.save(payload, path)
+
+    def load(self, path: str, apply_rms_to_env: bool = True) -> None:
+        """Load weights + opts + counters. If the checkpoint includes an RMS
+        state and ``apply_rms_to_env`` is True, also apply it to the env's
+        ObsAdapter (if one is present in the wrapper stack)."""
         ckpt = torch.load(path, map_location=self.device, weights_only=False)
         self.actor.load_state_dict(ckpt["actor"])
         self.critic.load_state_dict(ckpt["critic"])
@@ -476,3 +489,78 @@ class RLPDSAC:
         self.temp_opt.load_state_dict(ckpt["temp_opt"])
         self._env_steps = int(ckpt.get("env_steps", 0))
         self._gradient_steps = int(ckpt.get("gradient_steps", 0))
+
+        if apply_rms_to_env and "rms_mean" in ckpt:
+            self._apply_env_rms(
+                mean=ckpt["rms_mean"], var=ckpt["rms_var"], count=ckpt["rms_count"],
+            )
+            return  # RMS restored from checkpoint
+        # Caller should warm up RMS via warm_up_env_rms() if needed.
+
+    # ------------------------------------------------------------------
+    # ObsAdapter (RunningMeanStd) integration
+    # ------------------------------------------------------------------
+
+    def _find_obs_adapter(self):
+        """Walk wrapper stack to find the ObsAdapter. Local import avoids
+        circular dependency between algos and envs."""
+        from ..envs._wrapper_utils import find_inner
+        from ..envs.obs_adapter import ObsAdapter
+        return find_inner(self.env, ObsAdapter)
+
+    def _extract_env_rms(self) -> Optional[dict]:
+        """Read the train env's RunningMeanStd snapshot (or None if absent)."""
+        oa = self._find_obs_adapter()
+        if oa is None:
+            return None
+        rms = oa.rms
+        return {
+            "mean": rms.mean.copy(),
+            "var": rms.var.copy(),
+            "count": float(rms.count),
+        }
+
+    def _apply_env_rms(self, mean, var, count) -> None:
+        """Write a saved RMS snapshot into the env's ObsAdapter and freeze it."""
+        oa = self._find_obs_adapter()
+        if oa is None:
+            return
+        from ..envs.normalizer import RunningMeanStd
+        oa.rms = RunningMeanStd(mean=np.asarray(mean, dtype=np.float64),
+                                var=np.asarray(var, dtype=np.float64),
+                                count=float(count))
+        oa.training = False     # don't drift the loaded stats during eval
+
+    def has_rms(self) -> bool:
+        """Whether the env in this agent has any RMS samples accumulated."""
+        oa = self._find_obs_adapter()
+        if oa is None:
+            return False
+        return oa.rms.count > 1.0
+
+    def warm_up_env_rms(self, n_steps: int = 5000, action_source: str = "random") -> None:
+        """Bootstrap the env's RMS for evaluation when a checkpoint pre-dates
+        the RMS-save fix (TRACKER §28). Runs ``n_steps`` of env interaction
+        with either random actions or the agent's own deterministic policy,
+        letting the ObsAdapter accumulate statistics. Then freezes them.
+
+        Random-action warmup is fastest and gives a slightly wider obs
+        distribution than the trained policy would; tradeoff is the policy
+        may receive slightly mis-scaled inputs but the working policy is
+        usually robust to ~20% scale shifts on bounded observation channels.
+        """
+        oa = self._find_obs_adapter()
+        if oa is None:
+            raise RuntimeError("env stack has no ObsAdapter; can't warm up RMS")
+        oa.training = True   # enable updates during warmup
+
+        obs, _ = self.env.reset()
+        for _ in range(n_steps):
+            if action_source == "random":
+                action = self.env.action_space.sample()
+            else:
+                action, _ = self.predict(obs, deterministic=False)
+            obs, _, term, trunc, _ = self.env.step(action)
+            if term or trunc:
+                obs, _ = self.env.reset()
+        oa.training = False  # freeze post-warmup
