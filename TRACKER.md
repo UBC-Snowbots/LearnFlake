@@ -1782,3 +1782,58 @@ Path 1 is the smallest change with the biggest expected gain. Run gen_demos with
 - **Validate from a checkpoint right after pretrain.** v7 step 25k vs step 100k vs step 175k revealed that SAC erodes BC monotonically. Always eval the post-BC actor before letting RL touch it.
 - **The +30 to +70 training eval signal is dense reward, not success.** Across v5/v6/v7, training eval = +60 corresponded to wildly different orchestrator results (1/435 to 0/435). Trust orchestrator success, not training eval.
 - **When BC outperforms RL+BC, the demos are doing the actual learning and SAC is adding noise.** This is the signature of an oversampled-actor problem — the SAC exploration radius is wider than the success basin, so any exploration step moves out of the basin.
+
+---
+
+## 34 — v1.6 (expanded demos + pure BC): the dataset-coverage paradox
+
+### 34.1 Setup
+
+`gen_demos --keys all --trials-per-key 10 --reward-mode xy_focus` on all 87 keys × 10 trials = 870 attempts. M1 succeeded in **381/870 (44%)** — higher than expected; even Phase C edges like `menu`, `rctrl`, `right` produced some successes. Saved **14117 transitions** to `demos/approach_all_keys.h5` — 14× the v8 dataset.
+
+v9: same pure-BC config as v8 (500 epochs, `--steps 5000 --warmstart 10000` for zero gradient updates). BC NLL: -7.02 → -34.20 (vs v8's -27.5, tighter fit on bigger data).
+
+### 34.2 Result
+
+| Run | Demos | BC epochs | Approach success |
+|---|---|---|---|
+| v8 | 1032 transitions, 9 unique keys | 500 | **10/435 (2.3%)** |
+| v9 | 14117 transitions, ~50 unique keys | 500 | **3/435 (0.7%)** |
+
+**More demos = worse generalization at fixed capacity.** v9 lost `j` (which was 4/5 in v8) and only gained `u`, `i`, `o` (1/5 each, replacing some of the keys v8 covered).
+
+### 34.3 Diagnosis
+
+v8 fit ~9 keys densely (115 transitions/key avg); v9 spread the same 256-dim·3-layer actor across ~50 keys (282 transitions/key avg). The per-key fit *should* be better in v9 — but the actor's representational capacity is being asked to model more distinct (obs, action) mappings. The MLP averages, losing per-key precision.
+
+This is a classic underparameterized-BC failure: more diverse demos require more model capacity, not just more data. Two fixes:
+
+- **Bigger actor.** Hidden (512, 512, 512) or (256, 256, 256, 256, 256). Doubles parameter count.
+- **Filter to clean demos.** Keep only the M1 successes that converged in < 80 steps (i.e., the "easy" keys with consistent IK behavior). Drops noise from M1's marginal-key successes.
+
+### 34.4 Where v1 stops
+
+After 8+ hours of compute and 9 training iterations (v1, v3-v9 plus v4 termination), the maximum Approach success is **10/435 (2.3%) from v8 pure-BC** on the original 1032-transition demos. Full chain success across all attempts is **0/435** — Strike never followed up successfully on any approach success.
+
+The pipeline has structural limits that the iteration loop has now mapped out:
+
+1. **Online SAC degrades a BC-fitted policy faster than demos can re-anchor.** (§33 — v7 step 25k went 4/435 → 0 by step 75k.)
+2. **Pure BC is the strongest individual result.** (§33 v8: 10/435.)
+3. **BC underparameterizes with high-key-diversity demos.** (§34 v9: 3/435.)
+4. **The 4mm success criterion is fundamentally hard.** Even the strongest policy gets to ~48mm with consistent gradient (§32 v5 inspect_policy), then the last 44mm of refinement requires precision the policy hasn't internalized.
+
+### 34.5 What would push past 2.3%
+
+In rough order of expected impact per hour of work:
+
+- **A — bigger BC actor.** 30 min to test. Hidden (512, 512, 512). Re-run v9 BC.
+- **B — clean-demo filter.** 1 hour. Filter M1 successes to fast/consistent ones; re-run BC.
+- **C — CQL / IQL offline RL.** ~1 day. Replace SAC with a conservative offline algorithm. Predicted improvement: BC + offline-RL refinement could close the precision gap that v5/v6/v7 couldn't.
+- **D — much larger demo set with diverse seeds.** ~2 hours wallclock. `gen_demos --trials-per-key 50 --keys all`. Risk: doesn't help unless coupled with bigger actor (A).
+- **E — different action space.** Re-add cartesian/end-effector control as an option. Approach is geometrically simpler in cartesian than joint space. ~half day.
+
+### 34.6 Lessons (extending §33.5)
+
+- **Data quantity ≠ generalization.** v8 (9 keys, narrow) beat v9 (50 keys, wide) at the same actor capacity. BC's generalization is limited by model expressivity, not demo coverage.
+- **A 10/435 result is real signal.** It pinpoints key `j` (M1's strongest key) at 80% and 6 other keys at 20%. This says the architecture can solve specific keys end-to-end given good demos for that key — the bottleneck is uniform per-key precision, not algorithm choice.
+- **The full chain is bottlenecked by Strike, not Approach.** 0/435 chain across all variants means Strike's policy (trained against v1's broken Approach distribution) doesn't transfer to BC's Approach output distribution. A Strike retrain against v8's Approach is needed before chain success can be evaluated.
