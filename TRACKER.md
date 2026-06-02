@@ -2404,4 +2404,49 @@ approach — it only needs the success signal to refine, and the IK's ~62% succe
 makes that signal dense enough. v16b launched with `--reward-mode pbrs_only`,
 tube 0.15.
 
-_(v16b all-87 result filled in once it completes + evals.)_
+**Result — v16b solves Approach.** Training `eval_return` climbed 77 → **99.2**
+and plateaued (with `pbrs_only`, return ≈ success-rate × 100, so ~99 ≈ near-total
+success — and this time it is *real*: the all-87 eval agrees, unlike v16). All-87
+`eval_orchestrator --residual`:
+
+| checkpoint | Approach success |
+|---|---|
+| residual 100k | **431/435 (99.1%)** |
+| residual 200k (final) | **428/435 (98.4%)** |
+
+Distribution (final): **83 keys 5/5, 3 keys 4/5, 1 key 1/5, ZERO dead.**
+**86/87 keys at ≥80%** — only `lctrl` (1/5) falls short; `win/space/right` sit at
+4/5. Robust across checkpoints (100k ≈ 200k), and training-eval ≈ real-eval
+(success-aligned reward closed the v16 gap).
+
+### 38.3 Approach is solved — the full ledger
+
+| run | method | Approach | keys ≥80% |
+|---|---|---|---|
+| v8 | pure BC (original best) | 10/435 (2.3%) | 1 |
+| v12 | DAgger, 12 central keys | 129/435 (29.7%) | 17 |
+| v13b | DAgger, all keys, default pos | 200/435 (46.0%) | 29 |
+| v15 | DAgger, all keys, tuned pos (-0.10,-0.10) | 268/435 (61.6%) | 36 |
+| **v16b** | **residual RL on IK, pbrs_only, tube 0.15** | **428/435 (98.4%)** | **86/87** |
+
+What each lever contributed, in order: **DAgger** cured BC's covariate shift
+(2.3 → 46); **keyboard repositioning** recentred the dexterous window (46 → 61.6,
+the §36 mis-set-parameter fix); **residual RL** exceeded the IK's per-attempt
+ceiling and rescued the workspace-edge keys (61.6 → 98.4). The two earlier
+"dead-end" conclusions (§30 reward-shape, §36 kinematic limit) were both wrong
+framings that the cheap diagnostics + the right next lever overturned.
+
+**M4's Approach criterion (≥80/87 keys at ≥80%) is met: 86/87.** Best checkpoint:
+`checkpoints/approach_v16b_residual_sparse/residual_step_000100000.pt` (eval with
+`--residual --residual-tube 0.15 --keyboard-offset=-0.10,-0.10`).
+
+### 38.4 What remains
+
+- **Full-chain M4 still needs Strike.** Every chain number is 0/435 because the
+  Strike checkpoint was lost (§35.0) and the `--strike` arg is a stand-in. Retrain
+  Strike against this v16b Approach distribution to get a real end-to-end M4.
+- **`lctrl`** (1/5) is the lone Approach laggard — likely a far bottom-left corner;
+  a tube bump or a touch more training may clear it, or it's the 1-key spec gap.
+- **Sim only.** All of this is MuJoCo; sim-to-real (the real K552 + arm) is future
+  work, helped by the design choices made for it (band-limited residual, IK base
+  that runs on the real arm, action smoothing).
