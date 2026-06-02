@@ -93,6 +93,16 @@ def test_eval_success_returns_rate_in_unit_interval():
 def test_key_groups_cover_expected_sets():
     from rl_autonomy.scripts.train_dagger import KEY_GROUPS
     from rl_autonomy.envs.keyboard_layout import AVAILABLE_KEYS
+    avail = set(AVAILABLE_KEYS)
     assert len(KEY_GROUPS["all"]) == 87
-    assert set(KEY_GROUPS["central"]).issubset(set(AVAILABLE_KEYS))
+    assert set(KEY_GROUPS["central"]).issubset(avail)
     assert "j" in KEY_GROUPS["central"]
+    # 'stratified' must be valid, deduplicated, and genuinely spread (not a
+    # subset of the easy 'central' cluster) so it is a fair model-selection eval.
+    strat = KEY_GROUPS["stratified"]
+    assert set(strat).issubset(avail)
+    assert len(strat) == len(set(strat))                 # no dupes
+    assert 15 <= len(strat) <= 30
+    assert not set(strat).issubset(set(KEY_GROUPS["central"]))
+    # spans edge/corner keys the central cluster never touches
+    assert {"esc", "space", "left"} & set(strat)

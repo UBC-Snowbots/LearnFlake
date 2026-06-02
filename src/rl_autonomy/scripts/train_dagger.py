@@ -64,6 +64,16 @@ KEY_GROUPS = {
     # M1's strongest keys (home row + neighbours) — where the IK expert is most
     # reliable, so the cleanest test of "does DAgger close the covariate gap".
     "central": ["g", "h", "f", "j", "d", "k", "s", "l", "t", "y", "r", "u"],
+    # A ~24-key sample spread across rows/regions (corners, edges, f-row,
+    # numbers, home row, modifiers, arrows). Use as --eval-keys when training on
+    # 'all' so the per-round model-selection eval reflects the all-87 objective
+    # instead of just the easy central cluster (TRACKER §35.7 — fixes the v13
+    # model-selection bug where dagger_best was picked by central keys only).
+    "stratified": [
+        "esc", "f6", "f12", "grave", "5", "0", "backspace",
+        "tab", "t", "p", "backslash", "caps", "a", "f", "j",
+        "semicolon", "enter", "lshift", "b", "m", "space", "left", "up", "right",
+    ],
 }
 
 
