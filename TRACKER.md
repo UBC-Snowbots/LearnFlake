@@ -2009,6 +2009,59 @@ Two clean conclusions:
    - **Raise the ceiling: residual RL on the IK base, tube-clipped** — the only
      way past the expert's ~44% on the hard keys. *(v14, if v13 plateaus.)*
 
+### 35.6 v13 — DAgger on all 87 keys: 196/435 (45.1%)
+
+Same trainer, `--keys all --eval-keys central` (fast central proxy for in-loop
+eval), 5 rounds, 174 rollouts/round (~2 episodes/key/round), β-decay 0,
+256³ actor. Best (by central eval, 0.483) = round 5. Aggregate grew to ~134k
+labelled transitions.
+
+| Metric | v8 BC | v12 DAgger central | **v13 DAgger all** |
+|---|---|---|---|
+| Approach success | 10/435 (2.3%) | 129/435 (29.7%) | **196/435 (45.1%)** |
+| Keys with ≥1/5 | 7 | 45 | **59** |
+| Keys at ≥80% (4–5/5) | 1 | 17 | **29** |
+| Keys at 0/5 | 80 | 42 | **28** |
+
+(Per-key matrix `results/m4_dagger_v13.md`; chain 0/435 — Strike still lost, same
+stand-in caveat as §35.4.)
+
+**Reading:**
+- Training on every key lifted Approach 29.7% → **45.1%** (+52% rel). The
+  per-attempt rate (45%) now ≈ the IK expert's own rollout rate (~0.43–0.51 across
+  rounds) — **we are at the expert ceiling keyboard-wide.**
+- The 28 keys still at 0/5 are edge/corner/wide-reach keys (`esc f1 grave tab
+  caps lshift z x c v b space lctrl win lalt down right` …) the IK expert can't
+  reach from the above-keyboard init — **expert-limited, not DAgger-limited.**
+- **Interference + a model-selection bug:** several *central* keys that v12 nailed
+  (`a s d f`, `slash`, `j`) regressed to low/0 in v13 while many peripheral keys
+  gained. Two compounding causes: (a) one 256³ actor spreading across 87 keys
+  (the §34 capacity-dilution effect, though far milder under DAgger than under
+  plain BC); (b) **`dagger_best` was chosen by the 12-key central eval, which is a
+  poor proxy for the all-87 objective** — a later/other round likely scores
+  higher on all-87. Fixable cheaply: select by a broad key sample, and/or a
+  larger actor.
+
+### 35.7 Where v1.9 leaves it, and the fork
+
+DAgger took Approach from **2.3% → 45.1%** and validated the covariate-shift
+diagnosis decisively. We are now **expert-quality-capped**. Three independent
+levers, roughly increasing cost:
+1. **Better model selection (cheap).** Eval `dagger_best` against a broad key
+   sample (or run the all-87 matrix per round). Likely recovers the regressed
+   central keys for "free" — current 196 is a *lower bound* for v13's rounds.
+2. **Bigger actor under DAgger (cheap-ish).** v10 showed capacity didn't help
+   *plain BC*, but DAgger's data is richer; a 512³ actor may reduce the all-87
+   interference. One run.
+3. **Residual RL on the IK base, tube-clipped (the real ceiling-raiser).** The
+   only lever that can exceed the expert's ~44% and rescue the 28 zero-keys the
+   IK can't reach. Largest build (`algos/residual_actor.py` stub already exists).
+
+Also outstanding regardless of lever: **Strike must be retrained** against the
+new DAgger Approach distribution before any full-chain (M4) number is meaningful
+— every chain result to date is 0/435 because Strike was trained against v1's
+broken Approach (and its checkpoint was lost in §35.0).
+
 ### 35.5 References
 
 - Ross, Gordon, Bagnell, *A Reduction of Imitation Learning and Structured
