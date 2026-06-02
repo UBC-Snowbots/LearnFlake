@@ -77,6 +77,33 @@ def _approach_episode(
     return False, max_steps, {}
 
 
+def _chain_strike_phase(env, kb, aa, res_wrap, max_steps: int = 60) -> bool:
+    """TRUE chaining (TRACKER §39): the Approach env is already positioned over
+    the key. Switch to strike IN-PROCESS (no reset) and extend the solenoid
+    open-loop until contact-hold or timeout. Restores approach mode after."""
+    aa.set_mode("strike")
+    if res_wrap is not None:
+        res_wrap.bypass = True
+    kb.mode = "strike"
+    kb._contact_steps = 0
+    kb.done = False
+    extend = np.array([0, 0, 0, 0, 0, 0, 1.0], dtype=np.float32)
+    success = False
+    for _ in range(max_steps):
+        try:
+            env.step(extend)
+        except Exception:
+            break
+        if kb._check_success():
+            success = True
+            break
+    aa.set_mode("approach")
+    if res_wrap is not None:
+        res_wrap.bypass = False
+    kb.mode = "approach"
+    return success
+
+
 def _strike_episode(env, agent: RLPDSAC, max_steps: int = 50) -> tuple[bool, int, dict]:
     """Run Strike from current sim state. Note: this resets the env first
     because our env hard-resets on env.reset(). True Approach→Strike
@@ -98,7 +125,14 @@ def _strike_episode(env, agent: RLPDSAC, max_steps: int = 50) -> tuple[bool, int
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--approach", type=Path, required=True, help="Approach checkpoint .pt")
-    p.add_argument("--strike",   type=Path, required=True, help="Strike checkpoint .pt")
+    p.add_argument("--strike",   type=Path, default=None,
+                   help="Strike checkpoint .pt (not needed with --chain, which uses "
+                        "open-loop solenoid extend)")
+    p.add_argument("--chain", action="store_true",
+                   help="TRUE Approach→Strike chaining (TRACKER §39): after Approach "
+                        "succeeds, switch to strike IN-PROCESS (no reset) and extend "
+                        "the solenoid open-loop. Requires --residual. The real "
+                        "end-to-end M4 number.")
     p.add_argument("--keys", default="all",
                    help="comma-separated key names, or 'all', or 'home' (a..z + space)")
     p.add_argument("--trials-per-key", type=int, default=5)
@@ -153,11 +187,27 @@ def main() -> int:
         approach_env = make_env(mode="approach", frame_stack=args.frame_stack,
                                 domain_rand=False, random_key=False, seed=args.seed,
                                 key_aware_init=args.key_aware_init, keyboard_offset=kb_off)
-    strike_env = make_env(mode="strike", frame_stack=args.frame_stack,
-                          domain_rand=False, seed=args.seed, keyboard_offset=kb_off)
-
     approach_agent = _build_agent(approach_env, str(args.approach), args.device)
-    strike_agent = _build_agent(strike_env, str(args.strike), args.device)
+
+    # Chain mode needs in-process handles to the approach env's inner pieces.
+    chain_kb = chain_aa = chain_res = None
+    strike_env = strike_agent = None
+    if args.chain:
+        if not args.residual:
+            print("[eval] --chain requires --residual"); return 1
+        from rl_autonomy.envs._wrapper_utils import find_inner
+        from rl_autonomy.envs.action_adapter import ActionAdapter
+        from rl_autonomy.envs import ResidualIKWrapper
+        chain_kb = find_inner(approach_env, KeyboardEnv)
+        chain_aa = find_inner(approach_env, ActionAdapter)
+        chain_res = find_inner(approach_env, ResidualIKWrapper)
+        print("[eval] TRUE Approach→Strike chaining (in-process, open-loop solenoid)")
+    else:
+        if args.strike is None:
+            print("[eval] --strike is required without --chain"); return 1
+        strike_env = make_env(mode="strike", frame_stack=args.frame_stack,
+                              domain_rand=False, seed=args.seed, keyboard_offset=kb_off)
+        strike_agent = _build_agent(strike_env, str(args.strike), args.device)
 
     rows: list[dict] = []
     n_full_success = 0
@@ -176,9 +226,15 @@ def main() -> int:
             approach_passes += int(ok_a)
             if not ok_a:
                 continue
-            ok_s, steps_s, _ = _strike_episode(
-                strike_env, strike_agent, max_steps=args.max_strike_steps,
-            )
+            if args.chain:
+                ok_s = _chain_strike_phase(
+                    approach_env, chain_kb, chain_aa, chain_res,
+                    max_steps=max(args.max_strike_steps, 60),
+                )
+            else:
+                ok_s, _, _ = _strike_episode(
+                    strike_env, strike_agent, max_steps=args.max_strike_steps,
+                )
             strike_passes += int(ok_s)
             if ok_s:
                 full_passes += 1

@@ -53,11 +53,18 @@ class ResidualIKWrapper(gym.Wrapper):
         self._expert = IKExpert()
         # Telemetry: how hard the residual is pushing against the tube wall.
         self._last_residual_frac = 0.0
+        # When True, pass the action straight through (no IK add, no solenoid
+        # mask) — used during the Strike phase of true Approach→Strike chaining
+        # (TRACKER §39), where the arm holds and only the solenoid acts.
+        self.bypass = False
 
     def reset(self, **kwargs):
+        self.bypass = False
         return self.env.reset(**kwargs)
 
     def step(self, action):
+        if self.bypass:
+            return self.env.step(np.asarray(action, dtype=np.float32).reshape(7))
         residual = np.asarray(action, dtype=np.float32).reshape(7)
         a_ik = self._expert.action(self._kb)               # crisp, closed-loop
         a_final = np.empty(7, dtype=np.float32)

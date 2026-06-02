@@ -87,3 +87,48 @@ def test_tube_must_be_positive():
     from rl_autonomy.envs import make_residual_env
     with pytest.raises(ValueError):
         make_residual_env(tube=0.0)
+
+
+def test_chain_mode_switch_produces_strike_action():
+    """True-chain mechanics (TRACKER §39): ActionAdapter.set_mode('strike') +
+    ResidualIKWrapper.bypass=True must deliver [0,0,0,0,0,0,solenoid] to the
+    inner env (arm frozen, solenoid passes) — no IK added."""
+    from rl_autonomy.envs import make_residual_env, ResidualIKWrapper
+    from rl_autonomy.envs._wrapper_utils import find_inner
+    from rl_autonomy.envs.action_adapter import ActionAdapter
+    env = make_residual_env(tube=0.15, random_key=False, keyboard_offset=(-0.10, -0.10))
+    res = find_inner(env, ResidualIKWrapper)
+    aa = find_inner(env, ActionAdapter)
+    try:
+        env.reset()
+        aa.set_mode("strike")
+        res.bypass = True
+        captured = {}
+        inner = res.env
+        orig = inner.step
+        def rec(a):
+            captured["a"] = np.asarray(a, dtype=np.float32).copy()
+            return orig(a)
+        inner.step = rec
+        env.step(np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0], dtype=np.float32))
+        inner.step = orig
+        a = captured["a"]
+        assert np.allclose(a[:6], 0.0), f"joints must be frozen in strike, got {a[:6]}"
+        assert a[6] == 1.0, "solenoid action must pass through in strike+bypass"
+    finally:
+        env.close()
+
+
+def test_action_adapter_set_mode_validates():
+    from rl_autonomy.envs import make_env
+    from rl_autonomy.envs._wrapper_utils import find_inner
+    from rl_autonomy.envs.action_adapter import ActionAdapter
+    env = make_env(mode="approach", frame_stack=2, domain_rand=False, random_key=False)
+    aa = find_inner(env, ActionAdapter)
+    try:
+        aa.set_mode("strike"); assert aa.mode == "strike"
+        aa.set_mode("approach"); assert aa.mode == "approach"
+        with pytest.raises(ValueError):
+            aa.set_mode("nonsense")
+    finally:
+        env.close()

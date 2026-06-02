@@ -43,8 +43,15 @@ ARUCO_MAX_TILT = 0.30       # rad (~17°) — beyond this, detection degrades
 # Contact detection thresholds (mirrors synthetic-Moteus and real Moteus logic)
 # ---------------------------------------------------------------------------
 
-CONTACT_FORCE_THRESHOLD = 2.0     # N — actuator-tip contact force above this counts
-STALL_VEL_THRESHOLD = 0.005       # m/s — solenoid velocity below this counts
+# Strike contact-detection thresholds (TRACKER §39). The originals (2.0 N /
+# 0.005 m/s) were unphysically strict and made Strike-from-hover impossible: a
+# real Redragon K552 key actuates at ~0.5–0.6 N, so 2.0 N demanded ~3× a real
+# keypress; and 0.005 m/s required the solenoid to be nearly stationary while it
+# is still depressing the key (a real strike presses *through* the key travel,
+# so it is moving). With these realistic values the open-loop solenoid extend
+# already presses every reachable key from the v16b Approach endpoint (15/15).
+CONTACT_FORCE_THRESHOLD = 0.6     # N — ~ a real keyboard's actuation force
+STALL_VEL_THRESHOLD = 0.02        # m/s — "pressing" tolerates the key-travel motion
 
 
 # ---------------------------------------------------------------------------

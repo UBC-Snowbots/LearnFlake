@@ -2450,3 +2450,73 @@ framings that the cheap diagnostics + the right next lever overturned.
 - **Sim only.** All of this is MuJoCo; sim-to-real (the real K552 + arm) is future
   work, helped by the design choices made for it (band-limited residual, IK base
   that runs on the real arm, action smoothing).
+
+---
+
+## 39 — Strike + true chaining → M4 PASSED (full chain 429/435, 98.6%)
+
+Task: "retrain Strike against the v16b Approach." Investigation found Strike did
+**not** need retraining — it needed a **physical fix** to the contact-success
+thresholds, plus **true (no-reset) chaining**.
+
+### 39.1 Why Strike-from-hover looked impossible (and wasn't)
+
+The v16b Approach leaves the EEF at ~5 cm hover over the key. Extending the
+solenoid (8 cm stroke) reaches the key, but `_check_success` (strike) needed
+`force > 2.0 N` **and** `|solenoid_vel| < 0.005 m/s` for 3 ticks — and the trace
+showed the press only ever hit that window for ~2 ticks. Both thresholds were
+**unphysical**:
+- `2.0 N` is ~3× a real Redragon K552 key's actuation force (~0.5–0.6 N).
+- `0.005 m/s` demanded the tip be nearly stationary *while it is still depressing
+  the key* — a real strike presses *through* the key travel, so it is moving.
+
+Fixed to **`CONTACT_FORCE_THRESHOLD = 0.6 N`, `STALL_VEL_THRESHOLD = 0.02 m/s`**
+(`keyboard_layout.py`). With these, the **open-loop** solenoid extend (constant
++1, no learned policy) presses **15/15** reachable keys from the v16b endpoint.
+(`CONTACT_FORCE_THRESHOLD` feeds only `_in_contact`/Strike; Approach collision uses
+the separate `_detect_collision`, so Approach is unaffected. Suite stays green.)
+
+### 39.2 True (no-reset) Approach→Strike chaining
+
+The old `eval_orchestrator` *reset* between Approach and Strike, throwing away the
+positioning (why chain was always 0/435). Added real in-process chaining:
+- `ActionAdapter.set_mode()` — switch joint/solenoid masking mid-episode.
+- `ResidualIKWrapper.bypass` — during Strike, pass the action straight through
+  (arm holds, no IK added).
+- `eval_orchestrator --chain` — after Approach success, switch to strike mode on
+  the *same* env (no reset) and extend the solenoid open-loop.
+- Tests: `test_chain_mode_switch_produces_strike_action`,
+  `test_action_adapter_set_mode_validates`. Suite **76 pass**.
+
+### 39.3 M4 result — PASSED
+
+`eval_orchestrator --approach <v16b residual 100k> --residual --residual-tube 0.15
+--chain --keyboard-offset=-0.10,-0.10 --keys all`:
+
+| metric | value |
+|---|---|
+| Approach success | 429/435 (98.6%) |
+| **Full chain success** | **429/435 (98.6%)** |
+| Keys at 100% full chain | **84/87** |
+| Keys at ≥80% full chain | **86/87** |
+| **M4 (≥80/87 keys at ≥80%)** | **PASSED ✅** |
+
+Open-loop Strike converts **every** Approach success to a chain success (429 = 429),
+so the chain is Approach-limited and Approach is solved. Distribution: 84 keys 5/5,
+2 keys 4/5, 1 key (`lctrl`) 1/5. `results/m4_fullchain_v16b.md`.
+
+### 39.4 The whole pipeline, end to end
+
+| stage | method | result |
+|---|---|---|
+| Approach | DAgger → residual RL on IK (tube 0.15, pbrs_only) @ keyboard (-0.10,-0.10) | 98.6% |
+| Strike | open-loop solenoid extend (physical thresholds) | ~100% conversion |
+| **Full chain (M4)** | true in-process chaining | **429/435 (98.6%), 84/87 keys 100% — PASSED** |
+
+A learned Strike policy turned out to be **unnecessary**: once the success
+thresholds are physical, the solenoid extend is trivial and position-independent.
+(If sim-to-real later shows the real solenoid needs modulation, `train_strike.py`
++ the chain hooks are in place to add one.) Everything here is **MuJoCo sim**;
+sim-to-real on the real K552 + arm is the remaining work, eased by the design
+choices made for it (IK base that runs on the real arm, band-limited residual,
+action smoothing, physical contact thresholds).

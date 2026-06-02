@@ -45,6 +45,14 @@ class ActionAdapter(gym.Wrapper):
         # action_space stays 7-D — the policy gets the same shape regardless
         # of mode; the wrapper just zeros out irrelevant dims.
 
+    def set_mode(self, mode: Mode) -> None:
+        """Switch masking mode mid-episode (TRACKER §39 true Approach→Strike
+        chaining). Resets the smoothing filter so the new mode starts clean."""
+        if mode not in ("approach", "strike"):
+            raise ValueError(f"mode must be 'approach' or 'strike', got {mode!r}")
+        self.mode = mode
+        self._a_filt_joints = None
+
     def reset(self, **kwargs):
         self._a_filt_joints = None
         return self.env.reset(**kwargs)
