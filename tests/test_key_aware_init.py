@@ -58,6 +58,23 @@ def test_make_env_threads_key_aware_init():
         env.close()
 
 
+def test_make_env_threads_keyboard_offset():
+    """make_env(keyboard_offset=...) propagates to KeyboardEnv (TRACKER §36.5 —
+    repositioning the keyboard recenters the arm's dexterous window and unlocks
+    the left keys)."""
+    import numpy as np
+    from rl_autonomy.envs import make_env, KeyboardEnv
+    from rl_autonomy.envs._wrapper_utils import find_inner
+    env = make_env(mode="approach", frame_stack=2, domain_rand=False,
+                   random_key=False, keyboard_offset=(-0.15, -0.10))
+    try:
+        kb = find_inner(env, KeyboardEnv)
+        assert kb is not None
+        assert np.allclose(kb.keyboard_offset, (-0.15, -0.10))
+    finally:
+        env.close()
+
+
 def test_key_aware_init_closes_left_key_xy_gap():
     """key-aware init must close the IK expert's XY reach on a left key.
 

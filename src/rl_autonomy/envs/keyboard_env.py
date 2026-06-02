@@ -633,6 +633,7 @@ def make_env(
     seed: int | None = None,
     reward_mode: str = "dense",
     key_aware_init: bool = False,
+    keyboard_offset: tuple[float, float] = (-0.15, 0.0),
 ):
     """Build a fully-wrapped gym.Env ready for training.
 
@@ -656,6 +657,7 @@ def make_env(
         horizon=horizon,
         reward_mode=reward_mode,
         key_aware_init=key_aware_init,
+        keyboard_offset=keyboard_offset,
     )
     gym_env = KeyboardGymEnv(base, mode=mode, seed=seed)
     env = ActionAdapter(gym_env, mode=mode)

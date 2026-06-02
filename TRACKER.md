@@ -2220,3 +2220,48 @@ tilt-dead," which *cancelled* a ~1-day residual-RL build that would have failed 
 them, and reframed M4 from an algorithm goal to a physical-setup decision. Always
 probe the constraint's *nature* (which tolerance, kinematic vs control) before
 investing in a learner to beat it.
+
+### 36.5 CORRECTION — the left keys are NOT kinematically dead; the keyboard is just mis-positioned
+
+§36.1–36.3 concluded the left keys were "kinematically tilt-dead" and M4 was
+physically infeasible. **That conclusion was wrong** — it was an artifact of the
+key-aware-init probe. A follow-up cheap test (exposed `keyboard_offset` through
+`make_env`, then ran the expert through the **full pipeline, without key-aware
+init**, at different keyboard positions) overturns it:
+
+| keyboard_offset (x, y) | expert full-success on a 13-key left-heavy sample (×4) |
+|---|---|
+| (-0.15, **0.0**) — default | 16/52 — left keys (a,s,z,tab,caps,g,f,space) all **0** |
+| (-0.15, **-0.08**) | 22/52 — left keys waking up (s2 f4 g3 space2 tab1) |
+| (-0.15, **-0.10**) | **26/52** (+62%) — a2 s4 f3 g3 tab2 space2 |
+
+So the left keys reach **full success (xy<4mm AND tilt<5°)** once the keyboard is
+shifted ~10 cm toward the arm — they were simply **outside the arm's dexterous
+window at the default position**. The tilt-48° of §36.1 came from key-aware-init
+**rotating the shoulder**, which contorts the wrist out of vertical; it was never
+intrinsic to the left keys.
+
+**What is true:** the arm has a finite dexterous y-window; the TKL keyboard
+(~0.3 m wide) appears wider than that window, so there is a **left↔right
+trade-off** — shifting to reach the left costs a little on the far right
+(l/o/k/j drop 3–4 → 2 at y=-0.10). The right *single* position **maximises**
+coverage; finding it (and the max-reachable count) is the next experiment.
+
+**Revised conclusion:** M4 feasibility hinges on the **keyboard position**, which
+was never tuned. The default `(-0.15, 0.0)` is poor. Next steps:
+1. **Sweep `keyboard_offset` for the position that maximises all-87 expert
+   reachability** (this sets the realistic M4 ceiling), then retrain DAgger
+   there. Cheap and high-value.
+2. If even the best single position can't cover ≥80 keys (keyboard wider than the
+   window), then either a narrower target set, a relaxed tilt tolerance, or a
+   re-mount is needed — but that's only knowable after step 1.
+
+`key_aware_init` stays opt-in/tested but is **not** the left-key fix (it trades an
+XY miss for a tilt miss); keyboard repositioning is.
+
+**Lesson (refining §36.4):** the cheap test earned its keep *twice* — first it
+looked like a kinematic dead-end, but pushing one more cheap probe (vary the
+keyboard position, drop the confounding key-aware rotation) revealed the dead-end
+was a mis-set parameter. Beware concluding "physically impossible" from a probe
+that changed two things at once (here: init rotation **and** the tolerance under
+test). Isolate one variable.
