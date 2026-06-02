@@ -74,6 +74,19 @@ ABOVE_KEYBOARD_QPOS = np.array([
      0.7774,   # a6_rotation
 ])
 
+# Key-aware init (TRACKER §35.9 / §36). The single ABOVE_KEYBOARD_QPOS pose
+# parks the arm over the centre/right of the keyboard, so the DLS-IK expert
+# cannot close the last cm on the LEFT-side keys (large +y_local) — they sit at
+# the workspace edge where the Jacobian is poorly conditioned. Pre-rotating the
+# base (shoulder, joint 0) toward the target column fixes this: an empirical
+# sweep showed shoulder offset ≈ 3.8·y_local pulls every left key to sub-mm
+# reach. We clamp to >=0 (right/centre keys already work at offset 0; negative
+# offsets there hurt). This models a coarse base-orientation stage before the
+# learned fine Approach (a legitimate coarse-to-fine split). Opt-in via the
+# KeyboardEnv(key_aware_init=True) flag.
+KEY_AWARE_SHOULDER_GAIN = 3.8     # rad of shoulder per metre of local-y
+KEY_AWARE_SHOULDER_MAX = 0.7      # clamp so the base never swings past reach
+
 HOVER_HEIGHT = 0.05  # m above key surface where the EEF parks for a strike
 
 
@@ -146,6 +159,7 @@ class KeyboardEnv(ManipulationEnv):
         use_camera_obs: bool = False,
         gamma: float = 0.99,
         reward_mode: str = "dense",
+        key_aware_init: bool = False,
         **kwargs: Any,
     ) -> None:
         if mode not in ("approach", "strike"):
@@ -161,7 +175,10 @@ class KeyboardEnv(ManipulationEnv):
         self.keyboard_offset = np.array(keyboard_offset)
         self.keyboard_height = float(keyboard_height)
         self.random_key = bool(random_key)
+        self.key_aware_init = bool(key_aware_init)
         self._gamma = float(gamma)
+        # local-y (left-right) of each key, for the key-aware base pre-rotation.
+        self._key_local_y = {name: y for name, _x, y, *_ in KEYBOARD_LAYOUT}
 
         self._target_key = "g"            # default; randomized in reset() if random_key
         self._contact_steps = 0           # used by Strike
@@ -196,6 +213,22 @@ class KeyboardEnv(ManipulationEnv):
         if key_name not in AVAILABLE_KEYS:
             raise ValueError(f"unknown key {key_name!r}")
         self._target_key = key_name
+
+    def init_qpos_for_key(self, key_name: str) -> np.ndarray:
+        """ABOVE_KEYBOARD_QPOS pre-rotated at the base toward ``key_name``.
+
+        Shoulder offset = clamp(GAIN · max(0, y_local), 0, MAX). Returns the
+        plain pose when ``key_aware_init`` is off so callers can use it
+        unconditionally. See the KEY_AWARE_* constants / TRACKER §36.
+        """
+        base = ABOVE_KEYBOARD_QPOS.copy()
+        if not self.key_aware_init:
+            return base
+        y = float(self._key_local_y.get(key_name, 0.0))
+        offset = KEY_AWARE_SHOULDER_GAIN * max(0.0, y)
+        offset = float(np.clip(offset, 0.0, KEY_AWARE_SHOULDER_MAX))
+        base[0] += offset
+        return base
 
     @property
     def target_key(self) -> str:
@@ -321,14 +354,20 @@ class KeyboardEnv(ManipulationEnv):
         return super()._setup_observables()
 
     def _reset_internal(self) -> None:
-        # Default init pose is "above keyboard"; curricula override via
-        # robot.init_qpos before super()._reset_internal() runs.
+        # Pick the target key BEFORE choosing the init pose, so the optional
+        # key-aware base pre-rotation (TRACKER §36) can orient the arm toward
+        # the target column. For random_key envs this replaces the old
+        # post-reset randomization; for pinned-key envs the current target is
+        # kept. With key_aware_init off, init_qpos_for_key returns the plain
+        # ABOVE_KEYBOARD_QPOS, so default behaviour is unchanged.
+        if self.random_key:
+            self.set_target_key(np.random.choice(AVAILABLE_KEYS))
+
         # Init perturbation ±0.02 rad (≈±1.1°) per joint keeps the EEF tilt
-        # under 4° at reset, which is well inside the 5° success threshold so
-        # a position-only controller can converge. The state-replay curriculum
-        # (TRACKER §7) reintroduces wider diversity from demo states later.
+        # under 4° at reset, well inside the 5° success threshold so a
+        # position-only controller can converge.
         robot = self.robots[0]
-        robot.init_qpos = ABOVE_KEYBOARD_QPOS.copy()
+        robot.init_qpos = self.init_qpos_for_key(self._target_key)
         robot.init_qpos += np.random.uniform(-0.02, 0.02, size=6)
 
         super()._reset_internal()
@@ -337,8 +376,6 @@ class KeyboardEnv(ManipulationEnv):
         self._prev_action = None
         self._prev_potential = None
         self._collision_flag = False
-        if self.random_key:
-            self.set_target_key(np.random.choice(AVAILABLE_KEYS))
 
     # ------------------------------------------------------------------
     # Reward + termination
@@ -595,6 +632,7 @@ def make_env(
     horizon: int | None = None,
     seed: int | None = None,
     reward_mode: str = "dense",
+    key_aware_init: bool = False,
 ):
     """Build a fully-wrapped gym.Env ready for training.
 
@@ -617,6 +655,7 @@ def make_env(
         random_key=random_key,
         horizon=horizon,
         reward_mode=reward_mode,
+        key_aware_init=key_aware_init,
     )
     gym_env = KeyboardGymEnv(base, mode=mode, seed=seed)
     env = ActionAdapter(gym_env, mode=mode)

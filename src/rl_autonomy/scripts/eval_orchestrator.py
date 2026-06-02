@@ -60,6 +60,10 @@ def _approach_episode(
 ) -> tuple[bool, int, dict]:
     """Run Approach until success or timeout. Returns (success, steps, info)."""
     underlying = _find_keyboard_env(env)
+    # Pin the key BEFORE reset (env built random_key=False) so the observation
+    # reflects the target from step 0 and the optional key-aware base
+    # pre-rotation (TRACKER §36) is computed for the eval key, not a random one.
+    underlying.set_target_key(key)
     obs, _ = env.reset()
     underlying.set_target_key(key)
 
@@ -105,6 +109,10 @@ def main() -> int:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out-md", type=Path, default=None,
                    help="optional: write the success matrix to a markdown file")
+    p.add_argument("--key-aware-init", action="store_true",
+                   help="pre-rotate the arm base toward each key's column at reset "
+                        "(TRACKER §36). MUST match how the Approach checkpoint was "
+                        "trained (train_dagger --key-aware-init).")
     args = p.parse_args()
 
     if args.keys == "all":
@@ -126,7 +134,8 @@ def main() -> int:
     torch.manual_seed(args.seed)
 
     approach_env = make_env(mode="approach", frame_stack=args.frame_stack,
-                            domain_rand=False, seed=args.seed)
+                            domain_rand=False, random_key=False, seed=args.seed,
+                            key_aware_init=args.key_aware_init)
     strike_env = make_env(mode="strike", frame_stack=args.frame_stack,
                           domain_rand=False, seed=args.seed)
 

@@ -187,6 +187,11 @@ def main() -> int:
     p.add_argument("--actor-hidden", type=str, default=None,
                    help="comma-separated actor hidden widths, e.g. '256,256,256'")
     p.add_argument("--frame-stack", type=int, default=3)
+    p.add_argument("--key-aware-init", action="store_true",
+                   help="pre-rotate the arm base toward the target key's column at "
+                        "reset (TRACKER §36). Lets the IK expert reach the left-side "
+                        "keys it otherwise misses by 5-22mm. Eval must use the same "
+                        "flag (eval_orchestrator --key-aware-init).")
     p.add_argument("--save-dir", type=Path, default="checkpoints/approach_dagger")
     p.add_argument("--log-dir", type=Path, default="logs/approach_dagger")
     p.add_argument("--seed", type=int, default=0)
@@ -219,10 +224,10 @@ def main() -> int:
     # ---- envs (random_key=False so we pin the target per episode) ----
     train_env = make_env(mode="approach", frame_stack=args.frame_stack,
                          domain_rand=False, random_key=False, seed=args.seed,
-                         reward_mode=args.reward_mode)
+                         reward_mode=args.reward_mode, key_aware_init=args.key_aware_init)
     eval_env = make_env(mode="approach", frame_stack=args.frame_stack,
                         domain_rand=False, random_key=False, seed=args.seed + 1,
-                        reward_mode=args.reward_mode)
+                        reward_mode=args.reward_mode, key_aware_init=args.key_aware_init)
     kb = find_inner(train_env, KeyboardEnv)
     eval_kb = find_inner(eval_env, KeyboardEnv)
     assert kb is not None and eval_kb is not None
