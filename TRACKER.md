@@ -2358,3 +2358,50 @@ tolerance / a second keyboard pose).
 
 Best checkpoint: `checkpoints/approach_v15_dagger_kbpos/dagger_round_06.pt`
 (eval with `--keyboard-offset=-0.10,-0.10`).
+
+---
+
+## 38 — v16: residual RL on the IK base (the ceiling-raiser)
+
+The pre-registered lever past DAgger's expert-quality cap (§35.2, §37.1). The
+agent learns a tube-clipped residual added to the live IK action; the tube keeps
+exploration inside the 4 mm basin (the fix for what sank online SAC in v3–v7);
+the IK does the gross motion so RL only learns the local correction.
+
+**Build** (committed `2bbde2f`; full design in `documentation/residual_rl.md`):
+- `envs/residual_ik.py`: `ResidualIKWrapper` + `make_residual_env` —
+  `a_final[:6]=clip(a_ik[:6]+tube·residual[:6],-1,1)`, solenoid retracted.
+  ActionAdapter sits outside the wrapper → the *residual* is band-limited
+  (sim-to-real), the IK action stays crisp.
+- `scripts/train_residual.py`: RLPDSAC on the residual env, **zero-init actor
+  head** (starts at residual≈0 ⇒ pure IK ⇒ ~62% baseline), `random_key=True`
+  across all 87 keys at `keyboard_offset=(-0.10,-0.10)`.
+- `eval_orchestrator --residual --residual-tube T`.
+- Tests `tests/test_residual_ik.py` (4). Suite 74 pass.
+
+### 38.1 v16 (reward=xy_focus): the residual gamed the dense reward
+
+Trained 200k steps, tube 0.15, reward xy_focus. Training looked great —
+`eval_return` climbed **monotonically** 125 → 144 (no oscillation; the tube kept
+it stable, unlike v3–v7). **But all-87 eval = 32/435 (7.4%)** — *worse* than the
+zero-residual IK baseline. Diagnostic (easy keys, same env): zero-residual (pure
+IK) 10/18 vs **trained residual 5/18** — the residual *actively hurt* success
+while raising the dense return.
+
+This is the §30.7 lesson recurring **inside the residual**: `xy_focus`'s dense
+tolerance terms are gameable, so RL maximised per-step dense reward at a
+high-dense-but-not-success pose instead of triggering the +100 success bonus.
+`eval_return` is a misleading proxy when the dense reward has a local optimum.
+(RMS was fine — `has_rms: True`, no warmup; not the §28 bug.)
+
+### 38.2 v16b (reward=pbrs_only): success-aligned residual
+
+Fix: train the residual on a **success-dominant** reward — `pbrs_only` drops the
+gameable dense tolerance terms, keeping the +100 success bonus (+ collision, time,
+weak PBRS). The §31 "PBRS gradient too weak" failure does **not** apply here: the
+IK base provides the motion, so the residual doesn't need a dense gradient to
+approach — it only needs the success signal to refine, and the IK's ~62% success
+makes that signal dense enough. v16b launched with `--reward-mode pbrs_only`,
+tube 0.15.
+
+_(v16b all-87 result filled in once it completes + evals.)_
