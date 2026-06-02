@@ -1966,9 +1966,48 @@ because the corrective labels on bad states are the recovery signal we want).
 60 rollouts/round, β-decay 0 (policy drives from round 1), reward-mode xy_focus
 (irrelevant to BC but keeps the env consistent). In-loop eval is on the 12
 central keys; the all-87 M4 number comes from `eval_orchestrator` on
-`dagger_best.pt`.
+`dagger_best.pt` (best = round 2).
 
-_(Results: filled in below once the run + M4 eval complete.)_
+**In-loop eval (12 central keys, 5 trials each):** round 0 (BC baseline) 0.433
+→ peak **0.533** (rounds 2 & 5), oscillating 0.37–0.53 across rounds. DAgger
+lifted the BC baseline by ~+10 pts (+23% relative) and then **plateaued at ~0.53
+≈ the expert's own ~0.44–0.50 rollout rate** — exactly the predicted
+"DAgger is capped at expert quality" behaviour (§35.2). The expert is now the
+ceiling, not covariate shift.
+
+**All-87 M4 eval (`eval_orchestrator`, dagger_best = round 2):**
+
+| Metric | v8 (best prior, pure BC) | **v12 (DAgger, central)** |
+|---|---|---|
+| Approach success | 10/435 (2.3%) | **129/435 (29.7%)** |
+| Keys with ≥1/5 success | 7 | **45** |
+| Keys at ≥80% (4–5/5) | 1 (`j`) | **17** |
+
+A **13× jump over the best prior result**, and well beyond what the 12 training
+keys alone could yield (≤60/435) — the policy **generalizes across the keyboard**
+because the goal vector is in the observation, so it learned a goal-conditioned
+reach rather than per-key lookups. Keys at 5/5 include several *never trained on*
+(`0, o, p, lbracket, semicolon, slash` + the trained `j, k, l`). The 42 keys at
+0/5 are the edge/corner keys (`rctrl`, arrows, far f-row) the IK expert itself
+can't reach from the "above-keyboard" init — **expert-limited, not DAgger-limited**.
+(Full chain still 0/435: the Strike checkpoint was lost in §35.0's wipe, so the
+`--strike` arg used `dagger_best.pt` as a meaningless stand-in; only the Approach
+column is valid. Per-key matrix in `results/m4_dagger_v12.md`.)
+
+### 35.4.1 Reading of v12 and the next move
+
+Two clean conclusions:
+1. **The covariate-shift diagnosis was right.** DAgger turned BC's 2.3% into
+   29.7% by relabelling the policy's own visited states. The §30–§34 reward
+   detour was treating the wrong cause.
+2. **We are now expert-quality-capped**, as the literature predicted. Central-key
+   eval ≈ expert rollout rate; the 0/5 keys are where the IK expert fails. Two
+   levers remain, both pre-registered in §35.2:
+   - **Scale coverage: DAgger on `--keys all`** — train on every reachable key so
+     more of the 45 partial keys saturate to ≥80%. Expected to raise the M4
+     count further but still capped per-key at expert quality. *(v13, next.)*
+   - **Raise the ceiling: residual RL on the IK base, tube-clipped** — the only
+     way past the expert's ~44% on the hard keys. *(v14, if v13 plateaus.)*
 
 ### 35.5 References
 
