@@ -93,3 +93,6 @@ viz_demo/
 # trained policy checkpoints anywhere in the tree
 **/checkpoints/
 **/logs/
+
+# Python editable-install artifacts
+*.egg-info/
