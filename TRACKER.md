@@ -2265,3 +2265,39 @@ keyboard position, drop the confounding key-aware rotation) revealed the dead-en
 was a mis-set parameter. Beware concluding "physically impossible" from a probe
 that changed two things at once (here: init rotation **and** the tolerance under
 test). Isolate one variable.
+
+### 36.6 Keyboard-position sweep — the real M4 ceiling is ~71/87 at this arm
+
+Swept `keyboard_offset` over a coarse grid, counting expert-reachable keys
+(full success in ≤2 attempts) across all 87:
+
+| offset (x, y) | reachable | offset (x, y) | reachable |
+|---|---|---|---|
+| (-0.15, 0.0) default | 64/87 | (-0.15, -0.14) | 66/87 |
+| (-0.15, -0.06) | 69/87 | **(-0.10, -0.10)** | **71/87** |
+| (-0.15, -0.10) | 70/87 | (-0.20, -0.10) | 61/87 |
+
+**Findings:**
+- The untuned default (64/87) was leaving ~7 keys on the table. **Best found ≈
+  `(-0.10, -0.10)` → 71/87** (a 2D refinement might add 1–2 more).
+- But **71/87 < 80**, so **M4 (≥80/87) is not reachable at any single fixed
+  keyboard position with this arm** — the TKL is wider than the arm's dexterous
+  y-window (~16 keys are always outside it; the left↔right trade-off is real).
+- This is the *expert's* reachability (≤2 tries); a trained policy may convert a
+  couple of marginal keys but not the hard-out corner/edge ones.
+
+**What this means for M4 (≥80/87):** it requires a spec/hardware change, now
+quantified:
+1. **Relax the tilt tolerance.** Many of the 16 unreachable keys miss on tilt at
+   the window edge; if the real K552 solenoid strikes reliably at ~15–20°, raising
+   the threshold likely clears most of them. *Cheapest; needs a hardware answer.*
+2. **Reposition the keyboard between regions during operation** (e.g. a 2-pose
+   "left half / right half" routine) — doubles the effective window. Reasonable if
+   the task allows it.
+3. **Re-mount / longer arm / extra wrist DOF** — out of scope.
+4. **Accept ~71/87** as this arm's ceiling and redefine the target.
+
+**Recommended next (cheap, high-value):** adopt `keyboard_offset=(-0.10,-0.10)`,
+thread it through `train_dagger`/`eval_orchestrator`, and re-run DAgger there —
+should lift the all-87 Approach number from 200/435 toward the ~71-key ceiling.
+Then the M4-vs-71 gap is a pure spec decision (tilt tolerance / 2-pose).
