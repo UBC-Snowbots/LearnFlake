@@ -116,6 +116,12 @@ def main() -> int:
     p.add_argument("--keyboard-offset", type=str, default="-0.15,0.0",
                    help="keyboard placement 'x,y' (m). MUST match the offset the "
                         "Approach checkpoint was trained with (TRACKER §36.6).")
+    p.add_argument("--residual", action="store_true",
+                   help="Approach checkpoint is a residual-on-IK policy "
+                        "(TRACKER §38): build the residual env so the IK base is "
+                        "added to the policy's action.")
+    p.add_argument("--residual-tube", type=float, default=0.15,
+                   help="residual tube cap; MUST match training (--residual only).")
     args = p.parse_args()
 
     if args.keys == "all":
@@ -137,9 +143,16 @@ def main() -> int:
     torch.manual_seed(args.seed)
 
     kb_off = tuple(float(v) for v in args.keyboard_offset.split(","))
-    approach_env = make_env(mode="approach", frame_stack=args.frame_stack,
-                            domain_rand=False, random_key=False, seed=args.seed,
-                            key_aware_init=args.key_aware_init, keyboard_offset=kb_off)
+    if args.residual:
+        from rl_autonomy.envs import make_residual_env
+        print(f"[eval] residual-on-IK mode (tube={args.residual_tube})")
+        approach_env = make_residual_env(tube=args.residual_tube, reward_mode="xy_focus",
+                                         keyboard_offset=kb_off, random_key=False,
+                                         frame_stack=args.frame_stack, seed=args.seed)
+    else:
+        approach_env = make_env(mode="approach", frame_stack=args.frame_stack,
+                                domain_rand=False, random_key=False, seed=args.seed,
+                                key_aware_init=args.key_aware_init, keyboard_offset=kb_off)
     strike_env = make_env(mode="strike", frame_stack=args.frame_stack,
                           domain_rand=False, seed=args.seed, keyboard_offset=kb_off)
 

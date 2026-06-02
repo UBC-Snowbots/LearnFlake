@@ -25,10 +25,13 @@ from .keyboard_layout import (
 from .keyboard_env import KeyboardEnv, make_env
 from .domain_rand import DomainRandWrapper
 from .normalizer import RunningMeanStd
+from .residual_ik import ResidualIKWrapper, make_residual_env
 
 __all__ = [
     "KeyboardEnv",
     "make_env",
+    "ResidualIKWrapper",
+    "make_residual_env",
     "DomainRandWrapper",
     "RunningMeanStd",
     "KEYBOARD_LAYOUT",
