@@ -102,11 +102,18 @@ Key flags: `--keys {central|phase_a|phase_b|all|<comma-list>}`,
 ## What DAgger can and cannot do here
 
 - **Can:** cure the covariate-shift drift → robustly match the expert on the
-  keys it covers. This is the expected win.
+  keys it covers. This is the expected win (10/435 → 200/435, TRACKER §35–§35.8).
 - **Cannot:** exceed the expert's ~44% per-attempt quality. If DAgger plateaus
   at expert level, the ceiling-raiser is **residual RL on the IK base with a
-  tube-clipped delta** (keeps exploration inside the 4 mm basin) — see TRACKER
-  §35.2 item 2. That is the planned follow-on if needed.
+  tube-clipped delta** (keeps exploration inside the 4 mm basin) — TRACKER §35.2.
+- **Cannot:** beat a **kinematic limit**. TRACKER §36: the ~23 left-side keys are
+  not position-unreachable but **tilt-dead** — the arm can put the EEF over them
+  (sub-mm XY) but physically cannot keep the actuator within 5° of vertical there
+  (min achievable tilt 25–50°). No Approach policy (DAgger *or* residual RL) fixes
+  that; it needs a **physical/spec change** (reposition the keyboard, or relax the
+  tilt tolerance if the real solenoid strikes at an angle). So M4 (80/87) is a
+  setup decision, not an algorithm one. The reachable-in-full-pose set is the
+  centre/right ~60 keys.
 
 ## References
 

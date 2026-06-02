@@ -2143,3 +2143,80 @@ test before the full residual build.
   arXiv:2506.16685.
 - Kostrikov et al., *Offline RL with Implicit Q-Learning (IQL)*, ICLR 2022.
 - Fujimoto & Gu, *A Minimalist Approach to Offline RL (TD3+BC)*, NeurIPS 2021.
+
+---
+
+## 36 — v14 / key-aware init: the cheap lever proved the left keys are kinematically tilt-dead
+
+§35.9 found the ~23 dead keys are not *position*-unreachable (the arm gets within
+5–22 mm). The cheap pre-registered lever was a **key-aware base init**: pre-rotate
+the shoulder toward the target column so the IK expert reaches the left keys.
+Implemented as `KeyboardEnv(key_aware_init=True)` (TRACKER §36 code; shoulder +=
+clamp(3.8·max(0,y_local), 0, 0.7); right/centre keys unchanged), threaded through
+`make_env`, `train_dagger --key-aware-init`, and `eval_orchestrator --key-aware-init`
+(+ pin-key-before-reset). Tests: `tests/test_key_aware_init.py` (4). Suite 69 pass.
+
+### 36.1 It fixed XY — and revealed the real blocker is TILT
+
+Closed-loop expert reach with key-aware init **solved XY** on the left keys
+(`a` 16.6 → 0.2 mm, `caps` → 0.1 mm, `tab` → 0.4 mm). But **full success did not
+improve** (left keys 0/35 vs 1/35 without it; right keys 24/30 vs 25/30 — a hair
+worse). Measuring all three tolerances at the min-XY pose explained why:
+
+| key | xy @min | z @min | **tilt @min** | best min-tilt over episode |
+|---|---|---|---|---|
+| l, o (right) | 3.8 mm | 2.6–3.0 mm | **1.3–1.4°** ✅ | 1.3° |
+| g (centre-left) | 2.3 mm | 9.3 mm | 40° | 12.2° |
+| a, s, z, caps, tab (left) | 0.1–0.9 mm | 3–24 mm | **48–51°** ❌ | **25–35°** |
+
+The success criterion is xy<4 mm **and** z<5 mm **and** tilt<5°. The left keys
+nail XY but the actuator points **25–50° off vertical** there, and the IK — which
+actively weights orientation (w_rot up to 5.0) — **cannot get min-tilt below
+~25°**. This is a **hard kinematic/dexterity limit**: the 6-DOF arm can *position*
+the EEF over the left-edge keys but **physically cannot keep the actuator vertical**
+at that extension. Tilt degrades smoothly from ~1° (right) to ~50° (far left); the
+5° threshold is crossed in the centre-left, which is exactly the
+solved/unsolved boundary seen in every eval.
+
+### 36.2 What this means — M4 is a physical-setup problem, not an algorithm problem
+
+- **The cheap init lever does not unlock the left keys** (XY was never the blocker).
+- **Residual RL won't either.** It can exceed the expert's *precision/quality*, but
+  it cannot beat a kinematic constraint — no Approach policy can make this arm point
+  down over the left keys.
+- **M4 (≥80/87 keys at ≥80%) is very likely physically infeasible** with the current
+  arm mount + keyboard placement + 5° tilt requirement. The reachable-in-full-pose
+  set is the centre/right of the keyboard (~60–64 keys); the left ~23 are tilt-dead.
+
+To actually get the left keys, the fix is **physical / spec-level**, not learning:
+1. **Reposition** the keyboard toward the arm's dexterous workspace (e.g. shift the
+   `keyboard_offset` +y / rotate it) or move the arm mount — bring the left columns
+   into the cone where the wrist can verticalize. *Cheapest real fix; one env change.*
+2. **Relax the tilt tolerance** — legitimate *only* if the real solenoid actually
+   strikes keys reliably at, say, 15–20° (a hardware question for the K552 + the
+   spring-loaded tip). If yes, many left keys come back immediately.
+3. **Different arm / longer reach / wrist DOF** — out of scope.
+
+### 36.3 Revised plan
+
+- `key_aware_init` is kept as an **opt-in, tested** feature (default off — it changes
+  nothing unless asked). It is useful now as the diagnostic, and useful later if the
+  tilt tolerance is relaxed (then it genuinely unlocks the XY-reachable left keys).
+- **v14 (key-aware DAgger) was aborted** at round 0 — it can't raise full success
+  (rollout-succ 0.37 vs v13b 0.51; the rotated init trades right-key margin for
+  XY-only left reach that tilt rejects).
+- **Best Approach result stands at v13b round 6 = 200/435 (46.0%)**, which is at the
+  kinematic ceiling for the centre/right keys × the expert's per-attempt rate.
+- **Next decision is the user's**: (a) make the physical/spec change (reposition or
+  tilt-tolerance) to expand the reachable set, then re-run DAgger; and/or (b) residual
+  RL to push the *reachable* keys past the ~46% expert ceiling; and/or (c) retrain
+  Strike against the new Approach for a real full-chain number.
+
+### 36.4 Lesson
+
+**A "cheap test before the big build" earned its keep.** The 40-minute key-aware-init
+experiment converted "the left keys are hard" into "the left keys are kinematically
+tilt-dead," which *cancelled* a ~1-day residual-RL build that would have failed on
+them, and reframed M4 from an algorithm goal to a physical-setup decision. Always
+probe the constraint's *nature* (which tolerance, kinematic vs control) before
+investing in a learner to beat it.
