@@ -2062,6 +2062,49 @@ new DAgger Approach distribution before any full-chain (M4) number is meaningful
 — every chain result to date is 0/435 because Strike was trained against v1's
 broken Approach (and its checkpoint was lost in §35.0).
 
+### 35.8 v13b — clean BC-vs-DAgger ablation + the model-selection lesson
+
+Re-ran all-keys DAgger with `--eval-keys stratified` (a 24-key spread) to fix
+§35.7's model-selection concern, then evaluated multiple rounds on the **full
+all-87 matrix** to find the real best. The result corrected two things at once.
+
+| Checkpoint | What it is | all-87 Approach | Keys ≥80% |
+|---|---|---|---|
+| v8 | pure BC, original 1032-demo h5 | 10/435 (2.3%) | 1 |
+| v13b **round 0** | BC on all-key expert rollouts, **frozen RMS** | **115/435 (26.4%)** | 5 |
+| v13 round 5 | DAgger all-keys (central-selected) | 196/435 (45.1%) | 29 |
+| v13b **round 6** | DAgger all-keys (full) | **200/435 (46.0%)** | 29 |
+
+**Two clean conclusions:**
+1. **The methodology fixes alone took BC from 10/435 → 115/435** (11×): all-key
+   expert coverage + the frozen-RMS consistency fix (one normalizer for
+   collection, training, and eval) + fresh live-expert rollouts instead of the
+   stale gen-time-normalized h5. This is a big chunk of the win and is *pure BC*.
+2. **DAgger adds 115 → 200 on top** (~1.7×) even across all 87 keys — the
+   covariate-shift cure holds at full scale, contradicting the v13b *in-loop*
+   signal that had round 0 looking best.
+
+**Model-selection lesson (important):** the in-loop evals (12-key central or
+24-key stratified, 5 trials = 60–120 episodes) are **too noisy to select
+checkpoints** for the all-87 objective. The stratified eval crowned round 0
+(0.467) — yet round 0 scores only 115/435 on all-87 while round 6 scores 200.
+Only the full 435-trial matrix selects reliably; with DAgger the **latest round
+(most aggregated data) was best**, so "use the last checkpoint" is a safer
+default than trusting the noisy in-loop peak. `train_dagger` already saves every
+round, so this is a selection-time choice, not a retrain.
+
+**Geometry of the ceiling:** the ~23 keys stuck at 0/5 in the best checkpoint
+are the **left/bottom-left** cluster — `a s f g`, `z x c v b`, `tab q e caps`,
+`space`, and the left modifiers (`lctrl win lalt`). The arm reaches the
+centre/right of the keyboard but the IK expert cannot reach the left side from
+the above-keyboard init. This is a **workspace/expert limit**, and it is exactly
+what residual RL (or a better expert / a left-biased init) must address — DAgger
+cannot, since it is capped at expert quality and the expert simply fails there.
+
+**Net v1.9 headline: Approach 2.3% → 46.0% (200/435), 29/87 keys at ≥80%**,
+with a clean ablation showing methodology (10→115) and DAgger (115→200) each
+contribute. Best checkpoint: `checkpoints/approach_v13b_dagger_strat/dagger_round_06.pt`.
+
 ### 35.5 References
 
 - Ross, Gordon, Bagnell, *A Reduction of Imitation Learning and Structured
