@@ -2105,6 +2105,33 @@ cannot, since it is capped at expert quality and the expert simply fails there.
 with a clean ablation showing methodology (10→115) and DAgger (115→200) each
 contribute. Best checkpoint: `checkpoints/approach_v13b_dagger_strat/dagger_round_06.pt`.
 
+### 35.9 Reachability diagnostic — the dead keys are expert-limited, not arm-limited (de-risks v14)
+
+Before committing to the residual-RL build, probed whether the ~23 zero-keys are
+unreachable by the **arm** (residual RL can't help → M4 impossible) or just by
+the **IK expert** (residual RL can help). Ran the expert closed-loop (4 seeds,
+≤250 steps, smoothing off) and recorded best XY distance achieved:
+
+| key (right, DAgger-solved) | best XY | | key (left, 0/5) | best XY |
+|---|---|---|---|---|
+| l | 0.8 mm ✅ | | g | **5.2 mm** (just misses 4mm) |
+| o | 0.8 mm ✅ | | f | 8.7 mm |
+| k | 0.2 mm ✅ | | a / s / space / caps / tab | 12–20 mm |
+| | | | z | 22.5 mm (hardest) |
+
+**The arm physically reaches the vicinity of every left key (5–22 mm); the IK
+expert just can't close the last centimetre there** — the left side is near the
+workspace boundary where the DLS-Jacobian is poorly conditioned (damping caps the
+step, orientation/position weights fight). So the dead keys are
+**expert-precision-limited, not workspace-limited**, and **M4 is not obviously
+physically impossible**. This is exactly the regime residual RL targets: a
+bounded learned correction on top of the IK can close a 5–22 mm gap the IK can't,
+without the cm-scale undirected exploration that killed online SAC. **v14
+(residual RL on the IK base, tube-clipped) is justified and de-risked.** A
+cheaper partial win may also exist: a left-biased / per-region init pose so the
+expert *itself* reaches the left keys (then DAgger inherits it) — worth a quick
+test before the full residual build.
+
 ### 35.5 References
 
 - Ross, Gordon, Bagnell, *A Reduction of Imitation Learning and Structured
