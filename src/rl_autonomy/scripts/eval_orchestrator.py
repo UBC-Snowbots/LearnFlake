@@ -113,6 +113,9 @@ def main() -> int:
                    help="pre-rotate the arm base toward each key's column at reset "
                         "(TRACKER §36). MUST match how the Approach checkpoint was "
                         "trained (train_dagger --key-aware-init).")
+    p.add_argument("--keyboard-offset", type=str, default="-0.15,0.0",
+                   help="keyboard placement 'x,y' (m). MUST match the offset the "
+                        "Approach checkpoint was trained with (TRACKER §36.6).")
     args = p.parse_args()
 
     if args.keys == "all":
@@ -133,11 +136,12 @@ def main() -> int:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
+    kb_off = tuple(float(v) for v in args.keyboard_offset.split(","))
     approach_env = make_env(mode="approach", frame_stack=args.frame_stack,
                             domain_rand=False, random_key=False, seed=args.seed,
-                            key_aware_init=args.key_aware_init)
+                            key_aware_init=args.key_aware_init, keyboard_offset=kb_off)
     strike_env = make_env(mode="strike", frame_stack=args.frame_stack,
-                          domain_rand=False, seed=args.seed)
+                          domain_rand=False, seed=args.seed, keyboard_offset=kb_off)
 
     approach_agent = _build_agent(approach_env, str(args.approach), args.device)
     strike_agent = _build_agent(strike_env, str(args.strike), args.device)

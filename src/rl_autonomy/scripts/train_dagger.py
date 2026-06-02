@@ -187,6 +187,10 @@ def main() -> int:
     p.add_argument("--actor-hidden", type=str, default=None,
                    help="comma-separated actor hidden widths, e.g. '256,256,256'")
     p.add_argument("--frame-stack", type=int, default=3)
+    p.add_argument("--keyboard-offset", type=str, default="-0.15,0.0",
+                   help="keyboard placement 'x,y' (m). TRACKER §36.6: the default "
+                        "(-0.15,0.0) leaves the left half outside the arm's "
+                        "dexterous window; (-0.10,-0.10) reaches 71/87 vs 64.")
     p.add_argument("--key-aware-init", action="store_true",
                    help="pre-rotate the arm base toward the target key's column at "
                         "reset (TRACKER §36). Lets the IK expert reach the left-side "
@@ -221,13 +225,20 @@ def main() -> int:
           f"max_steps={args.max_steps} beta_decay={args.beta_decay}")
     print(f"[dagger] save_dir={save_dir}")
 
+    kb_off = tuple(float(v) for v in args.keyboard_offset.split(","))
+    if len(kb_off) != 2:
+        raise ValueError(f"--keyboard-offset must be 'x,y'; got {args.keyboard_offset!r}")
+    print(f"[dagger] keyboard_offset={kb_off}")
+
     # ---- envs (random_key=False so we pin the target per episode) ----
     train_env = make_env(mode="approach", frame_stack=args.frame_stack,
                          domain_rand=False, random_key=False, seed=args.seed,
-                         reward_mode=args.reward_mode, key_aware_init=args.key_aware_init)
+                         reward_mode=args.reward_mode, key_aware_init=args.key_aware_init,
+                         keyboard_offset=kb_off)
     eval_env = make_env(mode="approach", frame_stack=args.frame_stack,
                         domain_rand=False, random_key=False, seed=args.seed + 1,
-                        reward_mode=args.reward_mode, key_aware_init=args.key_aware_init)
+                        reward_mode=args.reward_mode, key_aware_init=args.key_aware_init,
+                        keyboard_offset=kb_off)
     kb = find_inner(train_env, KeyboardEnv)
     eval_kb = find_inner(eval_env, KeyboardEnv)
     assert kb is not None and eval_kb is not None
