@@ -1837,3 +1837,147 @@ In rough order of expected impact per hour of work:
 - **Data quantity ≠ generalization.** v8 (9 keys, narrow) beat v9 (50 keys, wide) at the same actor capacity. BC's generalization is limited by model expressivity, not demo coverage.
 - **A 10/435 result is real signal.** It pinpoints key `j` (M1's strongest key) at 80% and 6 other keys at 20%. This says the architecture can solve specific keys end-to-end given good demos for that key — the bottleneck is uniform per-key precision, not algorithm choice.
 - **The full chain is bottlenecked by Strike, not Approach.** 0/435 chain across all variants means Strike's policy (trained against v1's broken Approach distribution) doesn't transfer to BC's Approach output distribution. A Strike retrain against v8's Approach is needed before chain success can be evaluated.
+
+### 34.7 v1.7 / v1.8 — Options A & B run (capacity, then clean-filter): both falsified
+
+These were run in the same session as §34 but the **results were never written
+down** until now (the code landed in commits `1a529a2` "add --actor-hidden" and
+`8db2955` "--max-demo-episode-steps filter + arch-aware load"; the eval numbers
+were only in the session log). Recording them for completeness:
+
+| Run | Setup | Demos | Approach M4 |
+|---|---|---|---|
+| v8  | 256³ actor, pure BC | 1032 / 9 keys (`approach_phase_a.h5`) | **10/435** ← best |
+| v9  | 256³ actor, pure BC | 14117 / 67 keys (`approach_all_keys.h5`) | 3/435 |
+| v10 | **512³** actor (Option A), pure BC | 14117 / 67 keys | **2/435** |
+| v11 | 256³ actor, **≤40-step clean filter** (Option B), 7168 transitions | filtered all-keys | **3/435** |
+
+- **v10 (Option A — bigger actor) falsified the capacity hypothesis.** BC NLL bottomed at -34.24, *identical* to v9's -34.20 with 3.6× the parameters → the fit is at a **noise floor in the demos**, not a capacity wall. 2/435, worse than v9.
+- **v11 (Option B — clean-demo filter) falsified the noise hypothesis.** Filtering to the 237/381 episodes that converged in ≤40 steps lifted the *training-eval* to +54 (best pure-BC training-eval) but the M4 stayed at 3/435 — same as v9. Per-key analysis: the all-keys set has 2.7× more `j` transitions than v8 yet `j` went 4/5 → 0/5, because the actor's capacity is spread across 67 keys and it averages.
+- **Infra dividend:** v10's first eval crashed (eval_orchestrator built a 256³ shell, checkpoint was 512³). Fixed in `RLPDSAC.load` — it now reads `actor_hidden`/`critic_hidden` from the saved `config` and rebuilds the networks before loading state-dicts. Any future architecture change is now load-compatible.
+
+**Net of §34:** at fixed-everything-else, neither more data, more capacity, nor cleaner data moved BC off the ~10/435 ceiling. The per-key precision bottleneck is real, and the v8→v11 sweep shows it is **not** an optimization, capacity, or label-noise problem. §35 reframes it.
+
+---
+
+## 35 — v1.9: env recovery, the observability re-analysis, and DAgger (2026-06-01)
+
+A fresh session resumed here. Three things happened: an environment-loss
+incident and its permanent fix; a re-reading of the obs/expert code that
+**reframed the whole §30–§34 saga**; and the implementation of the approach the
+prior options-list (§34.5 A–E) missed entirely — **DAgger**.
+
+### 35.0 Environment-loss incident (and the permanent fix)
+
+The `rover_gpu` training stack (torch 2.10/2.11+cu128, mujoco, robosuite,
+dm-control) was only ever `pip install`-ed into the **container's writable
+layer** — never committed to `learnflake:gpu` (the image's setup layer is only
+296 MB; no torch). A `docker compose up -d rover_gpu` *recreated* the container
+and wiped it. Recovered by reinstalling (see `RECENT.md` for the exact command
+log; the torch step needed `--ignore-installed sympy` to get past apt's
+distutils sympy), verified 55/55 tests + GPU matmul on sm_120, then
+**`docker commit rover_gpu learnflake:gpu`** to bake the env in (10.4 → 25.3 GB).
+Pinned versions in `docker/rl_env_freeze.txt`. The `checkpoints/` and `logs/`
+dirs are gitignored and were **empty after recreation** — the v8–v11 model
+checkpoints were lost. The **demos survived** (`demos/*.h5`, on the bind mount),
+and pure-BC checkpoints regenerate in ~10 min, so this is recoverable: DAgger
+round 0 *is* the BC baseline regenerated from the surviving demos + live expert.
+
+### 35.1 The observability re-analysis — it was never an exploration/observability problem
+
+Re-reading `envs/obs_adapter.py`: the **actor observation already contains the
+exact goal vector** — `target_offset_eef` (3-D, the key offset in EEF frame) is
+in `ACTOR_FIELDS` (line 49), alongside the noisy `aruco_obs`. So the task is
+**fully observable for the actor**; the policy is not missing the goal. This
+quietly invalidates the "exploration/reward-shape" framing that drove §30–§32.
+
+What the demo *actions* actually are (re-reading `tools/gen_demos.py` →
+`_jacobian_step`): a deterministic damped-least-squares Jacobian-IK step, a
+function of `(current joint config, target offset, Jacobian at that config)`.
+That is an **interactive expert we can query at any state** — the single most
+important asset in this whole project, and §34.5's option list never used it.
+
+Putting the two together gives the real diagnosis. The §32/§34 symptom set —
+policy reaches ~48 mm then drifts back out; more keys make BC worse; bigger
+actor doesn't help; cleaner data doesn't help — is the **textbook signature of
+covariate shift / compounding error**, not representation or exploration. BC
+error compounds as O(T²·ε) because the cloned policy drifts into near-key
+fine-correction states the i.i.d. 1032-demo set never covered. (Spencer et al.,
+*Feedback in Imitation Learning: The Three Regimes of Covariate Shift*, RSS
+2021.)
+
+### 35.2 SOTA scan (2026-06-01) → DAgger first
+
+A literature scan (cited below) ranked the candidate fixes by
+(expected gain on the 4 mm precision problem) × (low implementation cost):
+
+1. **Vanilla automated DAgger** (Ross, Gordon & Bagnell, AISTATS 2011) — DO
+   FIRST. Roll out the current policy, query the IK expert at every visited
+   state, aggregate, refit. Converts O(T²ε) drift → O(Tε) and directly
+   populates the near-key region BC undersamples. We own the deterministic
+   free-to-query expert DAgger needs, so we skip *all* the query-rationing
+   variants (HG-/Ensemble-/Safe-/Thrifty-/RND-/Tube-DAgger) — they only exist to
+   ration expensive *human* labels.
+2. **Residual RL on the IK base, tube-clipped** (Residual Policy Learning, Silver
+   et al. 2018; CR-DAgger, Xu et al. NeurIPS 2025). A bounded corrective delta
+   around the 44%-success base keeps exploration *inside* the 4 mm basin —
+   structurally fixing the "exploration noise > success basin" failure that
+   killed every online-SAC run (v3–v7). This is the ceiling-raiser (can exceed
+   the expert's 44%); DAgger alone is capped at expert quality.
+3. **Offline-RL refinement** (TD3+BC simplest, then IQL; Cal-QL only if
+   offline→online) — only if DAgger shows we're expert-quality-capped. Lower
+   marginal value on near-optimal, fully-observable data.
+4. **ACT / diffusion / flow-matching BC** — deprioritized: their wins
+   (multimodality, long-horizon open-loop) don't match a deterministic,
+   unimodal, low-dim, closed-loop 4 mm reach.
+
+Caveat carried into the design: the IK expert is only ~44% successful, so its
+labels are imperfect — but the per-step DLS action is locally well-defined and
+high-quality *near* the key (the 44% failures are mostly far-field/singularity),
+which is exactly the region DAgger samples. Mitigation knob added:
+`--keep-only-success` (default off — vanilla DAgger keeps all visited states,
+because the corrective labels on bad states are the recovery signal we want).
+
+### 35.3 Implementation
+
+- **`algos/expert_ik.py`** (new) — the M1 DLS-Jacobian controller factored out
+  of `gen_demos` into a reusable `IKExpert` (queryable at any state) + `ik_step`.
+  `gen_demos._jacobian_step` is now a thin alias → one source of truth.
+  Exported from `rl_autonomy.algos`.
+- **`scripts/train_dagger.py`** (new) — the DAgger loop. Round 0 = expert-driven
+  BC (β=1); rounds ≥1 = current-policy rollouts (β-schedule) with the expert
+  labelling every visited state, aggregated, refit. A single RunningMeanStd is
+  warmed on expert rollouts then **frozen** so every round + eval share one
+  normalizer (sidesteps the gen-time-vs-eval RMS mismatch the old pure-BC path
+  had). Checkpoints saved via `RLPDSAC.save` → load straight into
+  `eval_orchestrator` (no changes there).
+- **Tests** (new, all green): `tests/test_expert_ik.py` (5 — shape/bounds/
+  solenoid mask, expert==ik_step equivalence, full-pipeline competence guard at
+  M1's documented ~44%, gen_demos delegation) and `tests/test_dagger.py` (5 —
+  key-pinning, expert-label collection, label=False no-op, eval-rate bounds,
+  key groups). Full suite **65 passing**.
+- **Sanity smoke** (2-key, 1-round): round 0 eval 0.50 (only `j`) → round 1 eval
+  1.00 (both `j` and `h`) — the covariate-shift cure visible in miniature
+  (relabeling the policy's own visited states fixed `h`).
+
+### 35.4 v12 — first real DAgger run
+
+`--keys central` (g h f j d k s l t y r u — M1's 12 strongest), 6 rounds,
+60 rollouts/round, β-decay 0 (policy drives from round 1), reward-mode xy_focus
+(irrelevant to BC but keeps the env consistent). In-loop eval is on the 12
+central keys; the all-87 M4 number comes from `eval_orchestrator` on
+`dagger_best.pt`.
+
+_(Results: filled in below once the run + M4 eval complete.)_
+
+### 35.5 References
+
+- Ross, Gordon, Bagnell, *A Reduction of Imitation Learning and Structured
+  Prediction to No-Regret Online Learning* (DAgger), AISTATS 2011.
+- Spencer et al., *Feedback in Imitation Learning: The Three Regimes of
+  Covariate Shift*, RSS 2021 — arXiv:2102.02872.
+- Silver et al., *Residual Policy Learning*, 2018 — arXiv:1812.06298.
+- Xu et al., *Compliant Residual DAgger (CR-DAgger)*, NeurIPS 2025 —
+  arXiv:2506.16685.
+- Kostrikov et al., *Offline RL with Implicit Q-Learning (IQL)*, ICLR 2022.
+- Fujimoto & Gu, *A Minimalist Approach to Offline RL (TD3+BC)*, NeurIPS 2021.

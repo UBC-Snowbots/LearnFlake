@@ -59,45 +59,15 @@ from rl_autonomy.envs.keyboard_layout import PHASE_A_KEYS, PHASE_B_KEYS, AVAILAB
 
 
 # ---------------------------------------------------------------------------
-# Adaptive-weight DLS Jacobian step — the M1 controller, re-used here
+# Adaptive-weight DLS Jacobian step — the M1 controller.
+#
+# The implementation now lives in rl_autonomy.algos.expert_ik (TRACKER §35) so
+# DAgger and demo generation share one source of truth. `_jacobian_step` is
+# kept as a thin alias so the rest of this file (and any external callers) are
+# unchanged.
 # ---------------------------------------------------------------------------
 
-def _jacobian_step(env: KeyboardEnv, target_xyz: np.ndarray) -> np.ndarray:
-    """Full-pose DLS Jacobian step (position + orientation-toward-vertical).
-
-    Identical to m1_p_controller._jacobian_step. Returns a 7-dim policy
-    action in [-1, 1]: 6 joint deltas (clipped) + solenoid retracted.
-    """
-    sim = env.sim
-    ep = sim.data.site_xpos[env._eef_site_id].copy()
-    err_pos = target_xyz - ep
-
-    pf = env.robots[0].robot_model.naming_prefix
-    obs = env._get_observations(force_update=False)
-    eef_quat = obs.get(f"{pf}eef_quat", np.array([1.0, 0.0, 0.0, 0.0]))
-    from rl_autonomy.envs.keyboard_env import quat_to_rot
-    R = quat_to_rot(eef_quat)
-    push_dir = -R[:, 1]
-    err_rot = np.cross(push_dir, np.array([0.0, 0.0, -1.0]))
-
-    tilt_mag = float(np.linalg.norm(err_rot))
-    w_rot = 5.0 if tilt_mag > 0.087 else (0.5 if tilt_mag < 0.017 else 1.0)
-    w_pos = 1.0
-
-    jacp = np.zeros((3, sim.model.nv))
-    jacr = np.zeros((3, sim.model.nv))
-    mujoco.mj_jacSite(sim.model._model, sim.data._data, jacp, jacr, env._eef_site_id)
-    J = np.vstack([w_pos * jacp[:, :6], w_rot * jacr[:, :6]])
-    err = np.concatenate([w_pos * err_pos, w_rot * err_rot])
-
-    damping = 0.06
-    JJt = J @ J.T + damping**2 * np.eye(6)
-    dq = J.T @ np.linalg.solve(JJt, err) * 0.5
-
-    a = np.zeros(7, dtype=np.float32)
-    a[0:6] = np.clip(dq / 0.05, -1.0, 1.0)
-    a[6] = -1.0
-    return a
+from rl_autonomy.algos.expert_ik import ik_step as _jacobian_step
 
 
 # ---------------------------------------------------------------------------
