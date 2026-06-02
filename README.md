@@ -3,82 +3,146 @@
 Reinforcement-learning pipeline for the Rover2026 6-DOF arm + solenoid actuator
 typing on a Redragon K552 TKL keyboard in MuJoCo (RoboSuite).
 
-> **v1 rewrite is on branch `aaron/rl_rewrite`.** Design contract:
-> [TRACKER.md](TRACKER.md). Background research:
-> [`src/rl_autonomy/documentation/rl_research_notes.md`](src/rl_autonomy/documentation/rl_research_notes.md).
+> **v1 rewrite is on branch `aaron/rl_rewrite`.** Full engineering log + every
+> design decision: [TRACKER.md](TRACKER.md). Skill design docs:
+> [`documentation/`](documentation/) (`dagger.md`, `residual_rl.md`).
 
-## v1 quickstart
+## Status — M4 PASSED ✅ (in sim)
 
-All commands run inside the `rover_gpu` docker container (see Docker section
-below for setup):
+The Approach→Strike pipeline solves the keyboard in MuJoCo:
 
-```bash
-# from inside rover_gpu, at /LearnFlake/.worktrees/rl_rewrite/
-pip install -e . --no-build-isolation     # one-time
-pytest tests/                              # 34 tests
-```
+| metric | value |
+|---|---|
+| Approach success (all 87 keys × 5 trials) | **429/435 (98.6%)** |
+| **Full chain (Approach→Strike)** | **429/435 (98.6%)** |
+| Keys at 100% full chain | **84/87** |
+| Keys at ≥80% (the M4 bar is ≥80/87) | **86/87 — PASSED** |
 
-### Visualize the env
-
-```bash
-# Live MuJoCo viewer
-python3 -m rl_autonomy.tools.visualize --policy p_ctrl --key g
-
-# Headless PNG sequence
-python3 -m rl_autonomy.tools.visualize --save-frames ./viz \
-    --policy p_ctrl --key f12 --steps 400 --frame-every 30
-```
-
-### Train Approach (1M steps, ~overnight on RTX 5060)
-
-```bash
-python3 -m rl_autonomy.scripts.train_approach \
-    --steps 1000000 --domain-rand \
-    --save-dir checkpoints/approach_v1 \
-    --log-dir logs/approach_v1
-tensorboard --logdir logs/approach_v1
-```
-
-### Train Strike (100k steps, ~30 min)
-
-```bash
-python3 -m rl_autonomy.scripts.train_strike \
-    --steps 100000 \
-    --save-dir checkpoints/strike_v1 \
-    --log-dir logs/strike_v1
-```
-
-### Evaluate the full pipeline (M4 acceptance)
-
-```bash
-python3 -m rl_autonomy.scripts.eval_orchestrator \
-    --approach checkpoints/approach_v1/approach_final.pt \
-    --strike   checkpoints/strike_v1/strike_final.pt \
-    --keys all --trials-per-key 5 \
-    --out-md results/m4_success_matrix.md
-```
-
-Pass criterion: ≥80/87 keys at ≥80% full-chain success.
-
-### Acceptance gates (TRACKER §15)
-
-| Gate | Status | What it checks |
-|---|---|---|
-| **M1** env correctness | ✅ PASSED | `python -m rl_autonomy.tools.m1_p_controller` |
-| **M2** algorithm correctness | ✅ PASSED | `python -m rl_autonomy.tools.m2_pendulum` |
-| **M3** Approach training | ⏳ pending full training run |
-| **M4** full pipeline 87-key matrix | ⏳ pending M3 + Strike training |
-| **M5** hardware | descoped (no real arm yet) |
+How it was solved (see TRACKER §35–§39 for the full story): **DAgger** on the
+hand-coded IK expert (cures behaviour-cloning's covariate shift) → **tuning the
+keyboard position** so the whole board is in the arm's dexterous workspace →
+**residual RL on the IK** (a tube-clipped learned correction that beats the
+expert's ~62% per-attempt ceiling) → **physical strike thresholds** + true
+in-process Approach→Strike chaining. The trained model is in
+[`models/approach_v16b_residual.pt`](models/) so you can test without retraining.
 
 ---
 
-Visit [Docker.md](Docker.md) for the most recent up-to-date installation guide if you plan on using Docker to manage your environment.
+## Quick test (reproduce M4)
 
-### Continued Installation Guide
-After you are done setting up the docker container, the markdown file located at [src/rl_autonomy/README.md](src/rl_autonomy/README.md) contains the installation steps to setup RoboSuite.
+All commands run **inside the `rover_gpu` container** (setup below). From
+`/LearnFlake`:
 
-Don't forget to install the following system drivers though:
-- X11: A windowing system protocol and display server that manages how graphical applications render and display windows. We need this so that Docker knows what display protocol to use when you run RoboSuite in the container.
+```bash
+# 0) sanity: the whole test suite (should print "76 passed")
+python3 -m pytest tests/ -q
+
+# 1) THE headline: full Approach→Strike chain over all 87 keys (~12 min)
+python3 -m rl_autonomy.scripts.eval_orchestrator \
+    --approach models/approach_v16b_residual.pt \
+    --residual --residual-tube 0.15 --chain --keyboard-offset=-0.10,-0.10 \
+    --keys all --trials-per-key 5 \
+    --out-md results/m4_fullchain.md
+# -> Full chain success: 429/435 (98.6%) ... M4 status: PASSED
+```
+
+> **Flag gotchas (must match how the model was trained):**
+> - `--residual --residual-tube 0.15` — the checkpoint is a residual-on-IK policy.
+> - `--keyboard-offset=-0.10,-0.10` — use the **`=` form** (a leading `-` value
+>   confuses argparse without it).
+> - `--chain` — true in-process Approach→Strike (no learned Strike policy needed;
+>   it extends the solenoid open-loop, which presses every reachable key).
+
+Approach-only matrix (no strike), if you want just the positioning number:
+
+```bash
+python3 -m rl_autonomy.scripts.eval_orchestrator \
+    --approach models/approach_v16b_residual.pt --strike models/approach_v16b_residual.pt \
+    --residual --residual-tube 0.15 --keyboard-offset=-0.10,-0.10 \
+    --keys all --trials-per-key 5
+# -> Approach success: 428/435 (98.4%)   (--strike is an ignored stand-in here)
+```
+
+### Watch a single key live (optional GUI)
+
+```bash
+python3 -m rl_autonomy.tools.visualize --policy p_ctrl --key g   # the IK expert
+```
+
+---
+
+## Retrain the pipeline from scratch
+
+Each stage is one command. The Approach stack is the interesting part; Strike is
+open-loop (no training needed).
+
+```bash
+# 1) DAgger Approach (cures BC covariate shift) — ~25 min, all 87 keys
+python3 -m rl_autonomy.scripts.train_dagger \
+    --keys all --eval-keys stratified --rounds 6 --rollouts-per-round 174 \
+    --keyboard-offset=-0.10,-0.10 \
+    --save-dir checkpoints/dagger --log-dir logs/dagger
+# best all-87 Approach from this stage alone ~ 200/435 (46%); pick the LAST round
+# (small in-loop evals are noisy — see TRACKER §35.8).
+
+# 2) Residual RL on the IK — the ceiling-raiser — ~25 min
+#    MUST use --reward-mode pbrs_only (success-aligned). xy_focus gets GAMED
+#    (TRACKER §38.1). zero-init head means it starts at the IK baseline.
+python3 -m rl_autonomy.scripts.train_residual \
+    --steps 200000 --tube 0.15 --reward-mode pbrs_only --keyboard-offset=-0.10,-0.10 \
+    --save-dir checkpoints/residual --log-dir logs/residual
+# -> residual_step_000100000.pt reaches ~99% Approach. This IS the M4 model.
+
+# 3) evaluate it (see "Quick test" above, pointing --approach at your checkpoint)
+```
+
+Notes:
+- **Demos** (`demos/*.h5`) are committed; DAgger/residual regenerate everything
+  else from the live IK expert, so a fresh clone needs no other artifacts.
+- `train_strike.py` exists but a learned Strike is **not** needed for M4 — the
+  open-loop solenoid extend (used by `--chain`) presses every reachable key once
+  the contact thresholds are physical (TRACKER §39).
+- Key files: env `src/rl_autonomy/envs/{keyboard_env,residual_ik}.py`; expert
+  `src/rl_autonomy/algos/expert_ik.py`; trainers `src/rl_autonomy/scripts/`.
+
+---
+
+## Environment setup
+
+The `rover_gpu` image already ships the full RL stack (torch 2.x+cu128 for
+Blackwell/RTX 50xx, mujoco, robosuite, dm-control) **baked in** as of 2026-06-01.
+Just bring it up:
+
+```bash
+docker compose up -d rover_gpu
+docker compose exec rover_gpu bash      # then: cd /LearnFlake
+```
+
+> Every `docker compose` command prints harmless host-side `pyenv`/`DISPLAY`
+> warnings before the real output — ignore them.
+
+**Setting up on a fresh machine** (image not built / env missing): the exact
+install command log + pinned versions are in [RECENT.md](RECENT.md) and
+[`docker/rl_env_freeze.txt`](docker/rl_env_freeze.txt). Short version, inside the
+container:
+
+```bash
+pip install "torch>=2.7" --index-url https://download.pytorch.org/whl/cu128
+pip install --ignore-installed sympy   # work around apt's distutils sympy, then re-run torch
+pip install numpy scipy "mujoco>=3.6" "gymnasium>=1.0,<2" dm-control h5py tqdm tensorboard PyYAML pytest
+pip install termcolor numba "mink==0.0.5" "qpsolvers[quadprog]" Pillow opencv-python-headless pynput
+pip install -e src/external_pkgs/RoboSuite --no-deps
+pip install -e . --no-deps
+# verify:
+python3 -c "import torch; print(torch.cuda.is_available())"   # True
+python3 -m pytest tests/ -q                                   # 76 passed
+# bake it so a container recreate can't wipe it:  (from the host)
+#   docker commit rover_gpu learnflake:gpu
+```
+
+Visit [Docker.md](Docker.md) for the full Docker install guide, and
+[src/rl_autonomy/README.md](src/rl_autonomy/README.md) for the RoboSuite setup.
+You also need **X11** on the host for the optional MuJoCo GUI (`visualize`).
 
 ## Windows Docker Guide
 Use the Windows/WSL compose file: `docker-compose.ubuntu.yml`.
@@ -118,4 +182,3 @@ docker compose -f docker-compose.ubuntu.yml exec rover_cpu bash
 ```bash
 docker compose -f docker-compose.ubuntu.yml down
 ```
-There's a buncha other stuff, like VcXsrv and other stuff that should be ok with my files. In the process of writing code if you come into issues with glfw not running or switching into egl (headless, no GUI), message Pranav.
