@@ -2301,3 +2301,60 @@ quantified:
 thread it through `train_dagger`/`eval_orchestrator`, and re-run DAgger there —
 should lift the all-87 Approach number from 200/435 toward the ~71-key ceiling.
 Then the M4-vs-71 gap is a pure spec decision (tilt tolerance / 2-pose).
+
+---
+
+## 37 — v15: DAgger at the tuned keyboard position → 268/435 (61.6%) Approach
+
+Adopted `keyboard_offset=(-0.10,-0.10)` (§36.6 best), threaded `--keyboard-offset`
+through `train_dagger` + `eval_orchestrator`, and re-ran all-keys DAgger there
+(6 rounds, 174 rollouts/round, otherwise identical to v13b). Eval at the matching
+offset (round 6, the latest = best per the §35.8 model-selection lesson).
+
+| Metric | v8 BC | v13b DAgger (default pos) | **v15 DAgger (tuned pos)** |
+|---|---|---|---|
+| Approach success | 10/435 (2.3%) | 200/435 (46.0%) | **268/435 (61.6%)** |
+| Keys with ≥1/5 | 7 | 59 | **84** |
+| Keys at ≥80% (4–5/5) | 1 | 29 | **36** |
+| Keys at 0/5 | 80 | 28 | **3** (`scrlk del right`) |
+
+(`results/m4_dagger_v15.md`; chain still 0/435 — Strike lost, stand-in.)
+
+**The single biggest lever in the whole project was a mis-set keyboard position.**
+Repositioning + DAgger:
+- lifted Approach 46% → **61.6%**,
+- brought the dead-key count **28 → 3**, and
+- pulled the **entire left side** to ≥80% (`a s d f g z x c lshift lalt win` — the
+  keys that were 0/5 for the entire v1–v13 history).
+
+In-loop training also improved across the board (round-0 BC stratified eval 0.575
+vs v13b 0.467; expert rollout-succ up to 0.67 vs 0.51), confirming the position —
+not the algorithm — was gating earlier runs.
+
+### 37.1 Where we are, and the last lever
+
+84/87 keys are now reachable; 36 are at ≥80%. The gap between "reachable" (84) and
+"≥80%" (36) is the **expert per-attempt ceiling** (~62%): most of the 48 keys at
+1–3/5 are reachable but the DAgger policy only matches the IK's ~62% per try. The
+one remaining lever to close that — and the pre-registered §35.2 ceiling-raiser —
+is **residual RL on the IK base (tube-clipped delta)**: it can exceed the expert's
+per-attempt quality while keeping exploration inside the 4 mm basin, lifting the
+1–3/5 keys toward 4–5/5. This is now the highest-value next build (it acts on 48
+already-reachable keys, not the 3 hard corners).
+
+For M4 (≥80/87 at ≥80%): with 84 keys reachable, M4 is now **plausibly in range**
+*if* residual RL lifts enough of the 48 mid keys past 80%. The 3 dead corners
+(`scrlk del right`) and any residual shortfall remain a spec question (tilt
+tolerance / a second keyboard pose).
+
+### 37.2 Result ledger (Approach, all-87 × 5 trials)
+
+| run | method | Approach |
+|---|---|---|
+| v8 | pure BC, original demos | 10/435 (2.3%) |
+| v12 | DAgger, 12 central keys | 129/435 (29.7%) |
+| v13b r6 | DAgger, all keys, default pos | 200/435 (46.0%) |
+| **v15 r6** | **DAgger, all keys, tuned pos (-0.10,-0.10)** | **268/435 (61.6%)** |
+
+Best checkpoint: `checkpoints/approach_v15_dagger_kbpos/dagger_round_06.pt`
+(eval with `--keyboard-offset=-0.10,-0.10`).
