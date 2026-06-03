@@ -63,6 +63,24 @@ python3 -m rl_autonomy.scripts.eval_orchestrator \
 # -> Approach success: 428/435 (98.4%)   (--strike is an ignored stand-in here)
 ```
 
+### Type a string (watch the arm type it out) 🎬
+
+Feed any text and the arm approaches + presses each key in MuJoCo, rendering an
+annotated MP4 (overlay shows the target key and the text typed so far). Sample
+output: [`media/typing_hello_world.mp4`](media/typing_hello_world.mp4).
+
+```bash
+python3 -m rl_autonomy.tools.type_string --text "hello world" --out typing.mp4
+# -> typed 11/11 keys successfully; wrote media to typing.mp4
+docker cp rover_gpu:/LearnFlake/typing.mp4 .      # copy it out to watch
+```
+
+- Each key is a fresh approach-from-home + strike (matches the 98.6% eval), so it
+  types **~98% of keys correctly** — e.g. "hello world" types 11/11.
+- `--camera agentview|frontview|sideview|birdview`, `--width/--height/--fps`,
+  `--continuous` (smoother key→key flow but less reliable — out-of-distribution
+  starts), `--interactive` (live X11 viewer instead of MP4).
+
 ### Watch a single key live (optional GUI)
 
 ```bash

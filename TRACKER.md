@@ -2520,3 +2520,24 @@ thresholds are physical, the solenoid extend is trivial and position-independent
 sim-to-real on the real K552 + arm is the remaining work, eased by the design
 choices made for it (IK base that runs on the real arm, band-limited residual,
 action smoothing, physical contact thresholds).
+
+---
+
+## 40 — Typing visualization (`tools.type_string`)
+
+A "type a string" demo: feed text, the arm approaches + presses each key in
+MuJoCo and renders an annotated MP4 (overlay = target key + text-typed-so-far).
+Uses the solved pipeline (residual Approach + open-loop Strike chain) with the
+committed model.
+
+- `src/rl_autonomy/tools/type_string.py` — `char_to_key` mapping (letters/digits/
+  space/enter/tab/punctuation; uppercase lowered, shift not modelled) + the
+  drive/render loop. Offscreen render via `kb.sim.render(camera=agentview)` →
+  `cv2.VideoWriter` MP4. `--interactive` for a live X11 viewer.
+- **Default = reset-to-home per key** (each key = a fresh approach, matching the
+  98.6% eval) → types ~98% of keys; "hello world" types **11/11**.
+  `--continuous` flows key→key without reset but is less reliable (the policy was
+  trained from the home pose, so a previous-key start is out-of-distribution —
+  the first continuous "hello world" only landed 3/11; reset-per-key landed 11/11).
+- Tests `tests/test_type_string.py` (4, mapping). Suite **80 pass**. Sample:
+  `media/typing_hello_world.mp4`.
