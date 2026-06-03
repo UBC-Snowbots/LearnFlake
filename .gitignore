@@ -96,3 +96,6 @@ viz_demo/
 
 # Python editable-install artifacts
 *.egg-info/
+
+# Per-machine Docker UID/GID mapping (host-specific, not for VCS)
+.env

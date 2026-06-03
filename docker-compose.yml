@@ -19,6 +19,7 @@ services:
       dockerfile: Dockerfile
     image: roverflake2:dev
     container_name: rover_dev
+    user: "${UID:-1000}:${GID:-1000}"
     working_dir: /RoverFlake2
     tty: true
     stdin_open: true
@@ -29,6 +30,7 @@ services:
       - ./:/RoverFlake2
     environment:
       - ROVERFLAKE_ROOT=/RoverFlake2
+      - HOME=/tmp
     network_mode: host
 
   rover_rl: # Default image for RL autonomy
@@ -38,6 +40,7 @@ services:
       dockerfile: Dockerfile
     image: learnflake:rl
     container_name: rover_rl
+    user: "${UID:-1000}:${GID:-1000}"
     working_dir: /LearnFlake
     tty: true
     stdin_open: true
@@ -51,10 +54,12 @@ services:
       - __GLX_VENDOR_LIBRARY_NAME=nvidia
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - HOME=/tmp
     network_mode: host
 
   rover_cpu: # CPU-only version of rover_gpu
     container_name: rover_cpu
+    user: "${UID:-1000}:${GID:-1000}"
     image: learnflake:cpu
     build:
       context: .
@@ -66,6 +71,7 @@ services:
       - DISPLAY=${DISPLAY}
       - ROVERFLAKE_ROOT=/LearnFlake
       - MUJOCO_GL=${MUJOCO_GL:-glfw} # default glfw; override with egl / osmesa / glx
+      - HOME=/tmp
     volumes:
       - ./:/LearnFlake
       - /tmp/.X11-unix:/tmp/.X11-unix
@@ -73,6 +79,7 @@ services:
 
   rover_gpu: # GPU (took me 4 hours to integrate)
     container_name: rover_gpu
+    user: "${UID:-1000}:${GID:-1000}"
     image: learnflake:gpu
     working_dir: /LearnFlake
     build:
@@ -88,6 +95,7 @@ services:
       - MUJOCO_GL=glfw # egl/glfw
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - HOME=/tmp
     volumes:
       - ./:/LearnFlake
       - /tmp/.X11-unix:/tmp/.X11-unix
