@@ -20,7 +20,7 @@ from .detector import DetectorConfig
 from .events import DebounceConfig
 from .pipeline import GesturePipeline
 from .pose import YoloPoseEstimator
-from .viz import draw
+from .viz import Overlay
 
 
 def build_pipeline(args) -> GesturePipeline:
@@ -90,6 +90,7 @@ def main(argv=None) -> int:
     is_file = isinstance(src, str) and Path(src).exists()
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     pipe = build_pipeline(args)
+    overlay = Overlay()
     writer = None
     events_f = open(args.events, "a") if args.events else None
     recorder = Recorder(Path(args.record), args.label, args.source) if args.record else None
@@ -108,7 +109,7 @@ def main(argv=None) -> int:
             if recorder:
                 recorder.add(t, out.persons, (frame.shape[1], frame.shape[0]))
             need_vis = args.out or args.show or args.clips
-            vis = draw(frame, out) if need_vis else None
+            vis = overlay(frame, out, t) if need_vis else None
             if args.clips:
                 clip_buf.append(vis)
             for ev in out.events:

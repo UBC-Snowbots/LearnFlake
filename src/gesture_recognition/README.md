@@ -51,11 +51,40 @@ pip install -r requirements.txt            # ultralytics pulls torch; first run 
 cd src/gesture_recognition
 python -m gesture_recognition.cli --source clip.mp4 --out annotated.mp4 --events events.jsonl
 python -m gesture_recognition.cli --source 0 --show            # webcam, press q to quit
-python -m pytest -q test                                       # 43 tests, no GPU or ROS needed
+python -m pytest -q test                                       # 45 tests, no GPU or ROS needed
 ```
 
 Useful flags: `--device 0` (GPU), `--hfov 70` (camera horizontal FOV for the bearing),
 `--clips events/` (saves the ~3 s leading up to each event as an mp4), `--no-zoom`.
+
+## Testing it on real people (do this first)
+
+1. **Record clips** on a phone or the rover camera, 10-20 s each, landscape, whole body in frame.
+   Name each one `<label>_<anything>.mp4`. Only `beckon` clips are expected to fire:
+
+   | file name | what to do in it |
+   |---|---|
+   | `beckon_<who>_<dist>.mp4` | beckon "come here" with the whole forearm, 3+ times. Do palm-up and palm-down versions, each arm, at 2, 5 and 10 m |
+   | `wave_<who>.mp4` | wave hello |
+   | `goaway_<who>.mp4` | shooing / "go away" (expected to FAIL for now, see limitations) |
+   | `none_<what>.mp4` | walking around, talking with hands, pointing, "stop" palm, phone, stretching |
+
+2. **Copy them to the box** (from the laptop): `scp *.mp4 pranav@<box>:~/gesture_clips/`
+3. **Run the batch test** (CPU, about real time at the default 15 fps cap):
+   ```bash
+   cd src/gesture_recognition
+   python -m gesture_recognition.batch ~/gesture_clips
+   ```
+   It prints a PASS/FAIL table (also saved as `results/report.md`). For each clip it lists the
+   most common reasons arms were rejected (e.g. `hand not raised`, `not repeated enough`,
+   `motion direction ambiguous`), which tells you which threshold a miss ran into.
+4. **Watch** `results/*.annotated.mp4`: every person shows their decision plus each arm's verdict
+   or rejection reason and hand height `h` (0 = hip, 1 = shoulder; beckons need `h >= 0.5`).
+5. **Retune without re-running video**: `python -m gesture_recognition.eval ~/gesture_clips/results/rec --min-raise 0.4`
+   replays the saved keypoints with new thresholds in seconds.
+
+For a live check on a laptop webcam instead: copy `src/gesture_recognition/` over,
+`pip install ultralytics opencv-python`, then `python -m gesture_recognition.cli --source 0 --show`.
 
 ## ROS 2 (Humble)
 
@@ -127,5 +156,6 @@ palm-down beckons, with either arm. Record **lots** of negatives: waving, pointi
 | `pipeline.py` | ties it together (no ROS) |
 | `cli.py` | video/webcam runner, event clips, `--record` |
 | `eval.py` | scores recorded data |
+| `batch.py` | pass/fail test on a folder of labelled clips |
 | `synthetic.py` | stick-figure motions for tests |
 | `ros_node.py`, `launch/`, `config/` | ROS 2 wrapper |
