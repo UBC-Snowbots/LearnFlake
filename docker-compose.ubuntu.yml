@@ -1,4 +1,4 @@
-# Docker Compose for LearnFlake on Windows (Ubuntu 22.04 LTS)
+# Docker Compose for LearnFlake on Windows (Ubuntu 24.04 LTS)
 #
 # Prerequisites:
 #   - Docker Desktop for Windows with WSL2 backend
@@ -21,7 +21,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.ubuntu
-    image: learnflake:ubuntu22.04
+    image: learnflake:ubuntu24.04
     container_name: learnflake_base
     working_dir: /LearnFlake
     tty: true
@@ -32,6 +32,7 @@ services:
     environment:
       - ROVERFLAKE_ROOT=/LearnFlake
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - ROS_DISTRO=${ROS_DISTRO:-jazzy}
       - MUJOCO_GL=${MUJOCO_GL:-glfw}
     # Bridge networking for Windows (host mode not available)
     network_mode: bridge
@@ -43,7 +44,7 @@ services:
     extends:
       service: rover_base
     container_name: learnflake_cpu
-    image: learnflake:ubuntu22.04-cpu
+    image: learnflake:ubuntu24.04-cpu
     volumes:
       - ./:/LearnFlake
       # WSLg support for GUI applications
@@ -52,6 +53,7 @@ services:
     environment:
       - ROVERFLAKE_ROOT=/LearnFlake
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - ROS_DISTRO=${ROS_DISTRO:-jazzy}
       - MUJOCO_GL=${MUJOCO_GL:-glfw}
       # Display configuration for WSLg
       - DISPLAY=${DISPLAY:-:0}
@@ -69,10 +71,11 @@ services:
     extends:
       service: rover_cpu
     container_name: learnflake_rl
-    image: learnflake:ubuntu22.04-rl
+    image: learnflake:ubuntu24.04-rl
     environment:
       - ROVERFLAKE_ROOT=/LearnFlake
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - ROS_DISTRO=${ROS_DISTRO:-jazzy}
       - MUJOCO_GL=${MUJOCO_GL:-glfw}
       # Inherit DISPLAY from host; override to host.docker.internal:0.0 only when using VcXsrv on Windows
       - DISPLAY=${DISPLAY:-:0}
@@ -91,7 +94,7 @@ services:
     extends:
       service: rover_cpu
     container_name: learnflake_gpu
-    image: learnflake:ubuntu22.04-gpu
+    image: learnflake:ubuntu24.04-gpu
     ports:
       - "8888:8888"
     deploy:
@@ -104,6 +107,7 @@ services:
     environment:
       - ROVERFLAKE_ROOT=/LearnFlake
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - ROS_DISTRO=${ROS_DISTRO:-jazzy}
       - MUJOCO_GL=${MUJOCO_GL:-glfw}
       - __GLX_VENDOR_LIBRARY_NAME=nvidia
       - NVIDIA_VISIBLE_DEVICES=all
@@ -123,7 +127,7 @@ services:
     extends:
       service: rover_cpu
     container_name: learnflake_dev
-    image: learnflake:ubuntu22.04-dev
+    image: learnflake:ubuntu24.04-dev
     # Expose common ports for development
     ports:
       # TensorBoard

@@ -3,7 +3,7 @@ echo script not ready yet && false
 
 
 # apt_packages_to_install=(
-#     "ros-humble-moveit-"
+#     "ros-jazzy-moveit-"
 #     "git"
 #     "btop"
 #     "tmux"

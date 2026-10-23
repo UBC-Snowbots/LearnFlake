@@ -1,5 +1,5 @@
 # More documention for how to create containers:
-# https://docs.ros.org/en/humble/How-To-Guides/Run-2-nodes-in-single-or-separate-docker-containers.html
+# https://docs.ros.org/en/jazzy/How-To-Guides/Run-2-nodes-in-single-or-separate-docker-containers.html (ROS 2 Jazzy)
 
 # version: '2' # idk why this not working
 
@@ -53,6 +53,7 @@ services:
       - MUJOCO_GL=${MUJOCO_GL:-glfw} # default glfw; override with egl / osmesa / glx
       - __GLX_VENDOR_LIBRARY_NAME=nvidia
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - ROS_DISTRO=${ROS_DISTRO:-jazzy}
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
       - HOME=/tmp
     network_mode: host
@@ -94,6 +95,7 @@ services:
       - __GLX_VENDOR_LIBRARY_NAME=nvidia
       - MUJOCO_GL=glfw # egl/glfw
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - ROS_DISTRO=${ROS_DISTRO:-jazzy}
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
       - HOME=/tmp
     volumes:
