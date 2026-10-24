@@ -1,6 +1,8 @@
-> **Branch `nvidia-rl-hackathon`**: the rover-intent project (Nebius × NVIDIA Global AI Hackathon, Physical AI track) lives in [`rover-intent/`](rover-intent/). LearnFlake's own README is on [`main`](https://github.com/UBC-Snowbots/LearnFlake/tree/main).
+> **Branch `nvidia-rl-hackathon`**: the Argetlam project (Nebius × NVIDIA Global AI Hackathon, Physical AI track) lives in [`argetlam/`](argetlam/). LearnFlake's own README is on [`main`](https://github.com/UBC-Snowbots/LearnFlake/tree/main).
 
-# rover-intent
+# Argetlam
+
+*Silver Hand. In Irish myth, King Nuada lost his arm in battle and ruled again with one made of silver.*
 
 **Drive a 6-axis rover arm with your body, your voice and (experimentally) your brain.**
 A webcam tracks your arm and drives the gripper in the plane you see on screen, NVIDIA Nemotron on Nebius Token
@@ -136,11 +138,11 @@ round-trip time (excluding the app's own hold time) and packet loss.
 
 ### Teleop modes
 
-- **`plane`** (default on the real arm, [`docs/PLANE_TELEOP.md`](rover-intent/docs/PLANE_TELEOP.md)): the camera sits in front of
+- **`plane`** (default on the real arm, [`docs/PLANE_TELEOP.md`](argetlam/docs/PLANE_TELEOP.md)): the camera sits in front of
   you and only the image plane is used. The right hand moves the gripper left/right and up/down; the left hand is a
   joystick-rate reach (hold it high to creep forward, low to pull back, a dead zone in between). Depth, the noisiest
   MediaPipe axis, is ignored, so there is no calibration capture. This is the mode behind the real-arm sessions.
-- **`arm_mirror`** ([`docs/ARM_MIRROR.md`](rover-intent/docs/ARM_MIRROR.md)): full-arm joint mirroring, no IK. Your shoulder,
+- **`arm_mirror`** ([`docs/ARM_MIRROR.md`](argetlam/docs/ARM_MIRROR.md)): full-arm joint mirroring, no IK. Your shoulder,
   elbow and wrist angles map straight to the arm's joints. Also has no calibration capture.
 
 The calibrated-mapper path below (a measured body-to-robot frame fit) is used by the older mapping mode and is kept
@@ -181,8 +183,8 @@ Instead of assuming axes, the operator's frame of reference is measured and fitt
 Every clutch-in afterwards is a **quick re-centre** (your pose at that moment becomes neutral) followed by a slow
 **glide** (12 cm/s) to the mapped point, so the arm never jumps.
 
-Implementation: [`body/calibration.py`](rover-intent/src/rover_intent/body/calibration.py) (maths),
-[`body/calib_session.py`](rover-intent/src/rover_intent/body/calib_session.py) (session + mapper).
+Implementation: [`body/calibration.py`](argetlam/src/rover_intent/body/calibration.py) (maths),
+[`body/calib_session.py`](argetlam/src/rover_intent/body/calib_session.py) (session + mapper).
 
 ---
 
@@ -238,7 +240,7 @@ The `SafetyLayer` sits between every command source and the arm:
 - **On the real-arm profile** (`dev_arm_real`) named poses and the no-camera jogs/sequences/speed move at once, with
   no spoken "yes" (the two-step confirm was too slow on the real mic); the pick/place **skills stay confirm-gated**.
 - Without `NEBIUS_API_KEY` an offline keyword parser keeps the loop usable. Full latency/accuracy table in
-  [`docs/VOICE.md`](rover-intent/docs/VOICE.md).
+  [`docs/VOICE.md`](argetlam/docs/VOICE.md).
 
 ---
 
@@ -286,7 +288,7 @@ the sim safely:
 
 `scripts/record_real.sh` records a raw session, `scripts/real_bag_to_csv.py` converts it to CSV, and the
 `scripts/bench/` sweeps (axis, drift, end-stop) produced the numbers above. See
-[`docs/REAL_DATA.md`](rover-intent/docs/REAL_DATA.md) and [`docs/BENCH_SESSION.md`](rover-intent/docs/BENCH_SESSION.md).
+[`docs/REAL_DATA.md`](argetlam/docs/REAL_DATA.md) and [`docs/BENCH_SESSION.md`](argetlam/docs/BENCH_SESSION.md).
 
 Simulation details:
 - Isaac Sim 6.0.1 + Isaac Lab 3.0, standalone script, CPU PhysX for a single arm (≈5× faster per step than the GPU
@@ -359,7 +361,7 @@ Set `body.grip_from_hand: false` while using it (otherwise an open hand re-opens
 
 Jaw clench is EMG, not brain activity. For a real brain-signal control we characterised two options offline on public
 datasets, restricted to the electrode sites nearest the Muse's, before the headband arrives. Full tables, caveats and
-a day-one checklist are in [`docs/muse_readiness.md`](rover-intent/docs/muse_readiness.md).
+a day-one checklist are in [`docs/muse_readiness.md`](argetlam/docs/muse_readiness.md).
 
 - **Alpha / eyes-closed** ("close your eyes to confirm") works on the Muse's own electrodes: on EEGMMIDB (109
   subjects, chance 50 %) the Muse-proxy sites reach ~0.84-0.86 balanced accuracy calibrated and ~0.73-0.76 cold at a
@@ -377,7 +379,7 @@ EMG vs a few uV of background above 30 Hz): 60/60 random double clenches caught 
 toggles in 10 min of talking + blinking + chewing, toggle fires ~1.6 s after the first clench starts. Not yet run on
 the real headband.
 
-**Day one, one command** (`eeg/sunday.py`, see [`docs/SUNDAY.md`](rover-intent/docs/SUNDAY.md)): `python -m rover_intent.eeg.sunday
+**Day one, one command** (`eeg/sunday.py`, see [`docs/SUNDAY.md`](argetlam/docs/SUNDAY.md)): `python -m rover_intent.eeg.sunday
 --board muse2 --name pranav` records a short labelled session (signal-quality gate, rest, single/double clenches,
 negatives, eyes-open/closed), fits YOUR clench + eyes-closed-alpha calibration on a held-out split, writes the
 profiles where the tools load them (old ones backed up), and runs a live double-clench -> gripper toggle into the SIM
@@ -390,7 +392,7 @@ stays on local disk and is never committed or uploaded.
 ## Repository layout
 
 ```
-rover-intent/
+argetlam/
 ├── configs/
 │   ├── default.yaml            shared settings (loop, network, body mapping, Nemotron, EEG, clutch)
 │   └── arms/{dev_arm,dev_arm_real,rover2026}.yaml   arm-specific: URDF, joints, home, limits, reach box, scene, modes
