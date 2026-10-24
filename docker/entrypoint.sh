@@ -15,7 +15,9 @@ fi
 # If workspace install/setup.bash doesn't exist yet, do a build
 if [ ! -f "$ROVERFLAKE_ROOT/install/setup.bash" ]; then
   echo "No install/setup.bash found, running colcon build..."
-  if ! colcon build --symlink-install; then
+  # only the ROS packages under src/external_pkgs (the repo root's setup.py is the RL package, not ROS)
+  if ! colcon build --symlink-install --base-paths src/external_pkgs \
+       --packages-up-to serial moteus_msgs moteus_control; then
     echo "WARNING: initial colcon build failed. Container stays up so you can debug." >&2
   fi
 fi

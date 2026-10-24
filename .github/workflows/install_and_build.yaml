@@ -62,7 +62,10 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/LearnFlake
           source /opt/ros/jazzy/setup.bash
-          colcon build --parallel-workers 4 || echo "colcon build failed (non-fatal for RL tests)"
+          # only the ROS packages: colcon must not scan the repo root (the RL package's setup.py is not a
+          # ROS package and breaks colcon's package identification)
+          colcon build --base-paths src/external_pkgs --packages-up-to serial moteus_msgs moteus_control \
+            --parallel-workers 4
 
       - name: Run tests
         run: |
