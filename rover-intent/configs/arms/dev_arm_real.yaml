@@ -1,0 +1,132 @@
+# dev_arm_real: the dev_arm profile tuned for driving the PHYSICAL arm (first sim->real follower test).
+# Deep-merged over configs/default.yaml like dev_arm.yaml; select with "--arm dev_arm_real" (app) or
+# "rover-stack on --arm dev_arm_real". Differences vs dev_arm.yaml (sim), all measured 2026-10-23 with our IK:
+#   - home = Rowan's return-to-base pose (the real arm's actual rest pose), not the sim's over-the-table pose.
+#   - workspace box moved up/in to CONTAIN that home's TCP (z ~0.52) and sit inside the real reachable shell.
+#   - max_vel / max_acc dropped to a conservative fraction of the firmware max (issue 2); the sim_to_real
+#     follower default --speed matches this fraction (0.2).
+#   - teleop_orient: axis  -> IK constrains only the tool pointing direction, freeing the wrist roll so joints
+#     4-6 don't spin to chase a fixed roll while teleoperating (issue 2).
+#   - joint_limits_* = intersection of the URDF limits and the firmware travel, 5 deg inside (issue 3).
+# dev_arm.yaml (the sim profile) and scripts/gate.sh are left untouched.
+
+arm:
+  urdf: assets/dev_arm/dev_arm_gripper.urdf
+  base_link: link_0
+  tip_link: link_6
+  tool_axis: [0, 0, 1]
+  tcp_offset: [0.0, 0.0, 0.2]
+  palm_above_tcp: 0.045
+  joints: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6]
+  # Rowan's return-to-base pose {61,30,20,125,94,180} fw deg. TCP = (0.545, -0.027, 0.520), tool points ~+x (horizontal).
+  home: [0.104, -1.415, -0.997, -0.229, -0.482, -3.142]
+  presets:
+    ready: [0.144, -1.131, -1.007, -0.003, 0.679, -2.957]     # sim over-the-table pose (gripper straight down)
+    base: [0.104, -1.415, -0.997, -0.229, -0.482, -3.142]     # the real rest pose (= home here)
+  # your arm drops out of view while following -> glide to base (stow) instead of freezing. The stepper arm can't
+  # go limp while powered (Rowan, 2026-10-23), so this replaces the moteus arm's limp "d stop".
+  on_drop: base
+  # What the REAL arm actually reaches when commanded at 0.2 of the firmware max (80/40/60/110/90/90 deg/s, the
+  # sim_to_real follower default --speed): 0.2 x fw x MEASURED_VEL_RATIO (control/stepper_map.py). The firmware runs
+  # 'V' at ~half the commanded speed (bench sweep 2026-10-23), so the old 0.2 x fw let the sim outrun the arm.
+  max_vel: [0.1357, 0.0624, 0.0988, 0.1620, 0.1540, 0.1389]   # rad/s
+  max_acc: [1.745, 1.745, 1.745, 1.745, 1.745, 1.745]         # rad/s^2  (= radians(100) each). The real ramp is
+  # near-instant after a 0.17-0.31 s command lag (sweep 2026-10-23); a gentler sim ramp is the safe side.
+  # frozen = position-only IK on joints 1-3, wrist (4-6) held: the wrist never spins to track position (issue 4,
+  # wrist_dig.py). Tool tilts ~7 deg on a 5 cm circle, ~12 deg at 10 cm. "axis" (free the roll) is still available.
+  teleop_orient: frozen
+  # intersection of URDF joint limits and firmware travel (q = radians(fw)*dir + zero, fw in [0, FWMAX]),
+  # 5 deg inside each bound. Home and both presets fit. j6 fw max 9999 -> firmware travel dominates [-174.5, 0].
+  joint_limits_lower: [-0.8735, -1.8127, -1.2587, -1.4127, -1.8955, -9.9127]
+  joint_limits_upper: [1.4127, 0.9127, 1.0102, 0.6435, 0.9627, -0.0873]
+
+sim:
+  usd: assets/dev_arm/usd/dev_arm_gripper/dev_arm_gripper.usda
+  default_view: behind
+  views:
+    behind: {eye: [-0.5, -0.5, 0.75], target: [0.5, 0.0, 0.1]}
+  tcp_body: tcp
+  finger_joints: [finger_left_joint, finger_right_joint]
+  stroke: 0.0425
+  actuators:
+    - {joints: [joint_1, joint_2, joint_3], stiffness: 2000.0, damping: 200.0, effort: 150.0, velocity: 1.5}
+    - {joints: [joint_4, joint_5, joint_6], stiffness: 400.0, damping: 40.0, effort: 30.0, velocity: 3.0}
+
+confirm:
+  skills: true   # the physical arm: require a spoken "yes" before any autonomous pick/place/move too
+  presets: false # named poses move at once, no spoken yes (Pranav 2026-10-23: the 2-step confirm was too slow
+                 # on the real mic); skills stay gated: they aim at SIM object positions
+  motion: false  # the no-camera voice jogs (Cartesian jog, joint jog, sequences, speed) also move at once: they are
+                 # bounded to the measured joint limits + the workspace box, so no spoken yes is needed either
+
+body:
+  mode: plane        # image-plane TCP teleop, depth ignored (body/plane.py). Switch to arm_mirror for the full-arm
+                     # joint-mirroring fallback. (plane and arm_mirror are the only body teleop modes.)
+  clutch: {calib_s: 2.0, still_m: 0.03, palm_s: 1.0, raise_m: 0.05}
+
+# Plane teleop (body.mode = plane). Every control is PARALLEL to the camera image plane; MediaPipe depth (z) is
+# never read, because on the first real run depth was the noisy axis (~28 mm std still vs ~3 mm in-plane). RIGHT hand
+# horizontal -> robot y (lateral, POSITION), RIGHT hand vertical -> robot z (vertical, POSITION), LEFT hand height ->
+# robot x (reach, a JOYSTICK RATE; see the plane table). Lateral/vertical are relative / clutched (captured on
+# engage); gains are metres of TCP per shoulder-width, picked so a comfortable human range covers the reachable box:
+# lateral +/-1.0 sw -> +/-0.20 m (covers y -0.22..0.18 around home -0.027); vertical +/-0.9 sw -> +/-0.135 m
+# (z 0.38..0.60 around 0.52). Reach is a rate: hold the left hand near shoulder height to creep forward (to x 0.70)
+# and near the lower chest to creep back (to x 0.47); mid-chest holds. Flip a sign if a control drives the wrong way
+# (or press M for a mirrored webcam). See docs/PLANE_TELEOP.md.
+plane:
+  side: right                 # the operator's CONTROL hand (lateral + vertical); the other hand drives reach
+  gain:    {lateral: 0.20, vertical: 0.15, reach: 0.15}   # reach gain is only used in reach_mode: position
+  sign:    {lateral: 1.0, vertical: 1.0, reach: 1.0}
+  one_euro: {min_cutoff: 1.0, beta: 0.05}
+  deadband: 0.015             # shoulder-widths
+  ramp_s: 2.0
+  drop_below_hip_s: 0.7       # control wrist below the hip line this long -> "right arm dropped" -> base
+  conf_gate: true
+  # Reach is a JOYSTICK RATE from the LEFT-hand height (2026-10-24, option A): the live test showed the old
+  # height->x POSITION map gave almost no forward room and was engage-relative (left hand hanging low at engage ->
+  # no room to go back). Rate reach reads the left-wrist height against the operator's own body (image plane only):
+  # ABOVE forward_frac of the shoulder->hip torso span (around shoulder height) -> reach moves forward; BELOW
+  # back_frac (around lower chest / mid torso) -> back; in between = dead zone, reach holds. Speed scales with how
+  # far past the threshold the hand is, up to max_speed, integrated onto tcp0's x and clamped to the box (the rate
+  # just stops at a wall, amber ghost, and reversing frees it at once - no wind-up). Hold the LEFT hand around
+  # mid-chest to hold reach. reach_mode: position restores the old height->x position map.
+  reach_mode: rate
+  reach_rate: {forward_frac: 0.10, back_frac: 0.45, max_speed: 0.04, full_scale: 0.5, hysteresis: 0.08}
+
+# Full-arm mirror mapping for the real dev_arm. neutral = the raw arm angle (rad) that maps to the base pose
+# (home). Defaults are Pranav's 2026-10-23 session medians (camera in FRONT). Tune per docs/ARM_MIRROR.md; with the
+# recommended camera BESIDE the operator the az neutral/sign usually need a one-time retune. gains/signs picked so
+# the reachable arm range covers the joint travel with little clamping (replay 2026-10-23).
+arm_mirror:
+  side: right
+  neutral: {az: -0.925, el: -0.419, elbow: 1.641, wrist: 0.0}
+  # gains tuned on the 2026-10-23 replay (clamp 22% -> 14%). J2/J3 use <1.0 because the robot's shoulder/elbow sit
+  # near their LOWER travel limits at home (base pose), so the downward/fold side of the human range clamps first;
+  # the residual J3 clamp is the arm hitting its real elbow-fold limit (ghost cues amber). Retune per operator.
+  gain:    {j1: 1.0, j2: 0.6, j3: 0.6, j5: 0.7}
+  sign:    {j1: 1.0, j2: 1.0, j3: 1.0, j5: 1.0}
+  one_euro: {min_cutoff: 1.0, beta: 0.05}
+  deadband_deg: 1.5
+  j1_hold_vert_deg: 20.0
+  ramp_s: 2.0
+  conf_gate: true
+
+safety:
+  # near-home box carved from the real reachable shell (frozen-wrist IK, real joint limits): contains the home TCP
+  # (0.545, -0.027, 0.520); most of the interior is reachable, edges clamp (the ghost already cues amber there).
+  # x max widened 0.64 -> 0.70 (2026-10-24) for more FORWARD reach room under the new rate-reach control: the frozen
+  # IK reaches x to ~0.75 across the whole y,z face (sweep 2026-10-24); 0.70 keeps 5 cm margin and the box stays
+  # 95.2% reachable on a 5^3 grid / 96.5% on 7^3 (worst miss 72 mm, unchanged, at a y/z corner, not the x extreme).
+  # x min kept at 0.47 (the back edge is already near the reachable limit). Forward room from home: 0.095 -> 0.155 m.
+  workspace_min: [0.47, -0.22, 0.38]
+  workspace_max: [0.70, 0.18, 0.60]
+
+table:
+  top: 0.0
+  x: [0.30, 0.75]
+  y: [-0.50, 0.50]
+
+scene:
+  cup:    {pos: [0.45, 0.20, 0.055], height: 0.09, radius: 0.035, mass: 0.15, shape: cylinder, desc: "short red cup"}
+  bottle: {pos: [0.45, -0.20, 0.185], height: 0.22, radius: 0.035, mass: 0.50, shape: cylinder, desc: "tall blue bottle"}
+  block:  {pos: [0.56, 0.00, 0.035], height: 0.05, radius: 0.025, mass: 0.10, shape: box, desc: "small yellow cube"}

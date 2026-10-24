@@ -2,7 +2,7 @@
 
     python scripts/tcp_relay.py            # listens on 127.0.0.1:47101... see --port
 Laptop:
-    ssh -N -L 47120:127.0.0.1:47120 parsec-vm        (leave running)
+    ssh -N -L 47120:127.0.0.1:47120 your-server        (leave running)
     python body_client.py --tunnel 127.0.0.1:47120
 
 Protocol: newline-delimited JSON both ways. Each TCP client gets its own UDP socket, so the app's replies and 10 Hz
@@ -11,6 +11,11 @@ status messages (sent to the UDP source address) come back to the right client.
 import argparse
 import selectors
 import socket
+import time
+
+
+def _ts() -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def main():
@@ -40,7 +45,7 @@ def main():
                 peers[c] = [u, b""]
                 sel.register(c, selectors.EVENT_READ, ("tcp", u))
                 sel.register(u, selectors.EVENT_READ, ("udp", c))
-                print(f"[relay] client {addr}", flush=True)
+                print(f"{_ts()} [relay] client connected {addr}", flush=True)
             elif kind == "tcp":
                 c = key.fileobj
                 try:
@@ -52,7 +57,7 @@ def main():
                 if not data:
                     u = peers.pop(c)[0]
                     sel.unregister(c); sel.unregister(u); c.close(); u.close()
-                    print("[relay] client gone", flush=True)
+                    print(f"{_ts()} [relay] client disconnected", flush=True)
                     continue
                 buf = peers[c][1] + data
                 *lines, peers[c][1] = buf.split(b"\n")
