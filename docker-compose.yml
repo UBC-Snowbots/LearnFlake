@@ -34,7 +34,13 @@ services:
     network_mode: host
 
   rover_rl: # Default image for RL autonomy
-    runtime: nvidia
+    deploy:   # GPU via the standard device reservation (works without a named 'nvidia' runtime)
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     build:
       context: .
       dockerfile: Dockerfile
@@ -86,7 +92,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    runtime: nvidia
     environment:
       - DISPLAY=${DISPLAY}
       - ROVERFLAKE_ROOT=/LearnFlake
