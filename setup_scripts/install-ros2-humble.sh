@@ -1,3 +1,7 @@
+# DEPRECATED (Humble-era, Ubuntu 22.04). LearnFlake is now Ubuntu 24.04 / ROS 2 Jazzy.
+# For native setup use the team CLI: rovercli setup --distro jazzy (see setup_scripts/README.md).
+# Kept for reference only; not used by the Docker build.
+
 source $ROVERFLAKE_ROOT/setup_scripts/utils/common.sh
 
 echo CHECKING FOR ROS2 DESKTOP

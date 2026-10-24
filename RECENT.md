@@ -1,3 +1,28 @@
+# 2026-10-23 — Migrated to Ubuntu 24.04 / ROS 2 Jazzy / Python 3.12
+
+Was: Ubuntu 22.04 / ROS 2 Humble / Python 3.10. Branch `prnv/jazzy-24.04` (off main).
+
+**What changed:**
+- `Dockerfile`: base `osrf/ros:humble-desktop` -> `osrf/ros:jazzy-desktop`;
+  `ros-humble-*` -> `ros-jazzy-*`; `ROS_DISTRO=jazzy`. The RL stack is now baked
+  into a venv at `/opt/rl-venv` (24.04 is PEP 668 externally-managed; the venv is
+  `--system-site-packages` so rclpy from `/opt/ros/jazzy` stays importable). Same
+  pins as `docker/rl_env_freeze.txt` (torch 2.11.0+cu128, numpy 1.26.4, mujoco
+  3.9.0). The old `setup_everything_common.sh` call is gone; the image gets ROS
+  from the osrf base and ML deps from the venv step.
+- `Dockerfile.ubuntu`: `ubuntu:22.04` -> `ubuntu:24.04`; ROS install now uses the
+  `ros2-apt-source` .deb (same method as rovercli `install-ros2.sh`); 3.12 pins.
+- `docker/entrypoint.sh`: sources `/opt/ros/${ROS_DISTRO}` and activates the venv.
+- Native setup now points at the team CLI **rovercli** (`setup --distro jazzy`),
+  see `setup_scripts/README.md`. Humble scripts marked DEPRECATED; dead Gazebo
+  script removed (we use MuJoCo).
+- `.github/workflows/install_and_build.yaml`: CI on `ubuntu-24.04` via rovercli,
+  modelled on RoverFlake2's workflow (committed, not run here).
+
+**Note:** mujoco is 3.9.0 (the actual pin in `rl_env_freeze.txt`), not the 3.6.0
+mentioned in the pyproject comment. If physics regresses, this is the first thing
+to check.
+
 # Added images
 
 Now we need a way to know what changed in the new image (e.g. other than doing a ton of pip installs, you've now added a venv and the person who pulls your image doesn't know that)

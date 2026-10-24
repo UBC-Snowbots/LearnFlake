@@ -1,10 +1,15 @@
-# Ubuntu 22.04 LTS Dockerfile for LearnFlake (ROS2 Humble + RoboSuite)
+# Ubuntu 24.04 LTS Dockerfile for LearnFlake (ROS2 Jazzy + RoboSuite)
 # Designed for Windows Docker Desktop
 #
 # Build:  docker compose -f docker-compose.ubuntu.yml build
 # Run:    docker compose -f docker-compose.ubuntu.yml run --rm rover_rl bash
+#
+# Migrated from Ubuntu 22.04 / ROS2 Humble 2026-10. The ROS install uses the
+# ros2-apt-source .deb, the same method as the team CLI (rovercli
+# setup_scripts/install-ros2.sh); for a native host install prefer rovercli
+# directly (see setup_scripts/README.md).
 
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 # Prevent interactive prompts during build
 ENV DEBIAN_FRONTEND=noninteractive
@@ -12,7 +17,10 @@ ENV TZ=Etc/UTC
 
 # Workspace configuration
 ENV ROVERFLAKE_ROOT=/LearnFlake
+ENV ROS_DISTRO=jazzy
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+ENV RL_VENV=/opt/rl-venv
+ENV PATH=$RL_VENV/bin:$PATH
 
 # Locale setup (required for ROS2)
 RUN apt-get update && apt-get install -y \
@@ -25,39 +33,44 @@ ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
 # ============================================================================
-# ROS2 Humble Installation (Ubuntu 22.04 LTS)
+# ROS2 Jazzy Installation (Ubuntu 24.04 LTS)
+# Uses the ros2-apt-source .deb, matching rovercli/setup_scripts/install-ros2.sh
 # ============================================================================
 RUN apt-get update && apt-get install -y \
     software-properties-common \
     curl \
     gnupg \
     lsb-release \
+    && add-apt-repository -y universe \
     && rm -rf /var/lib/apt/lists/*
 
-# Add ROS2 apt repository
-RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
+# Add ROS2 apt repository via the official ros-apt-source release deb
+RUN export ROS_APT_SOURCE_VERSION=$(curl -s https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest | grep -F "tag_name" | awk -F\" '{print $4}') \
+    && curl -L -o /tmp/ros2-apt-source.deb "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.$(. /etc/os-release && echo ${UBUNTU_CODENAME:-${VERSION_CODENAME}})_all.deb" \
+    && dpkg -i /tmp/ros2-apt-source.deb \
+    && rm -f /tmp/ros2-apt-source.deb
 
-# Install ROS2 Humble Desktop (full installation)
+# Install ROS2 Jazzy Desktop (full installation)
 RUN apt-get update && apt-get install -y \
-    ros-humble-desktop \
-    ros-humble-rmw-cyclonedds-cpp \
+    ros-jazzy-desktop \
+    ros-jazzy-rmw-cyclonedds-cpp \
     python3-colcon-common-extensions \
     python3-rosdep \
     python3-argcomplete \
+    ros-dev-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
 # ROS2 Additional Packages
 # ============================================================================
 RUN apt-get update && apt-get install -y \
-    ros-humble-urdf \
-    ros-humble-xacro \
-    ros-humble-image-transport \
-    ros-humble-cv-bridge \
-    ros-humble-rosidl-default-generators \
-    ros-humble-rosidl-default-runtime \
-    ros-humble-ament-cmake \
+    ros-jazzy-urdf \
+    ros-jazzy-xacro \
+    ros-jazzy-image-transport \
+    ros-jazzy-cv-bridge \
+    ros-jazzy-rosidl-default-generators \
+    ros-jazzy-rosidl-default-runtime \
+    ros-jazzy-ament-cmake \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
@@ -107,36 +120,24 @@ RUN apt-get update && apt-get install -y \
 
 # ============================================================================
 # Python Dependencies
+# Python 3.12 on 24.04 is PEP 668 externally-managed, so the RL stack lives in
+# a venv. --system-site-packages keeps rclpy (on PYTHONPATH from ROS) importable.
+# Pins track docker/rl_env_freeze.txt (the env that produced M4). This image is
+# CPU-only, so torch is the CPU wheel; use the GPU Dockerfile for cu128/Blackwell.
 # ============================================================================
-
-# Upgrade pip
-RUN python3 -m pip install --upgrade pip setuptools wheel
-
-# Remove distutils-installed sympy that conflicts with PyTorch
-RUN pip install --ignore-installed sympy
-
-# Install PyTorch (CPU) - with extended timeout for large download
-RUN pip install --no-cache-dir --default-timeout=300 --ignore-installed torch torchvision torchaudio
-
-# Install MuJoCo
-RUN pip install --no-cache-dir mujoco
-
-# Install core ML/RL dependencies (pinned versions for compatibility)
-# Note: numba requires specific numpy version, coverage causes issues with numba
-RUN pip install --no-cache-dir "numpy<1.25.0" "scipy<1.12.0" "numba>=0.57.0,<0.59.0" gymnasium stable-baselines3
-RUN pip uninstall -y coverage || true
-
-# Install gym 0.23 (specific version needed)
-RUN pip install --no-cache-dir gym==0.23.0
-
-# Install visualization and data tools
-RUN pip install --no-cache-dir tensorboard matplotlib h5py opencv-python Pillow
-
-# Install RoboSuite dependencies
-RUN pip install --no-cache-dir mink==0.0.5 qpsolvers pynput termcolor tqdm
-
-# Install pybullet
-RUN pip install --no-cache-dir pybullet
+RUN python3 -m venv ${RL_VENV} --system-site-packages \
+    && ${RL_VENV}/bin/pip install --upgrade pip setuptools wheel \
+    && ${RL_VENV}/bin/pip install --no-cache-dir --default-timeout=300 \
+       torch torchvision torchaudio \
+    && ${RL_VENV}/bin/pip install --no-cache-dir \
+       "numpy==1.26.4" "scipy==1.15.3" "numba==0.65.1" \
+       "mujoco==3.9.0" "gymnasium==1.3.0" \
+       "stable-baselines3>=2.7,<3" "sb3-contrib>=2.7,<3" \
+       "dm-control==1.0.41" "h5py==3.16.0" "tqdm>=4.66" \
+       "tensorboard==2.20.0" "PyYAML>=6.0" \
+       "mink==0.0.5" "qpsolvers==4.12.0" "pynput" "termcolor" \
+       "matplotlib" "opencv-python" "Pillow" "pybullet" \
+       "pytest>=7.4" "pytest-cov>=4.1" "coverage>=7.10" "ruff>=0.4"
 
 # ============================================================================
 # Workspace Setup
@@ -148,18 +149,19 @@ COPY . ${ROVERFLAKE_ROOT}
 
 # Initialize rosdep (ignore errors if already initialized)
 RUN rosdep init 2>/dev/null || true \
-    && rosdep update --rosdistro humble
+    && rosdep update --rosdistro jazzy
 
 # Install ROS dependencies from package.xml files
-RUN . /opt/ros/humble/setup.sh \
+RUN . /opt/ros/jazzy/setup.sh \
     && cd ${ROVERFLAKE_ROOT} \
-    && rosdep install --from-paths src --ignore-src -r -y 2>/dev/null || true
+    && rosdep install --from-paths src --ignore-src -r \
+       --skip-keys="serial moteus_msgs" -y 2>/dev/null || true
 
 # Install RoboSuite in editable mode
-RUN pip install -e ${ROVERFLAKE_ROOT}/src/external_pkgs/RoboSuite 2>/dev/null || true
+RUN ${RL_VENV}/bin/pip install --no-cache-dir -e ${ROVERFLAKE_ROOT}/src/external_pkgs/RoboSuite 2>/dev/null || true
 
-# Install rl_autonomy requirements
-RUN pip install -r ${ROVERFLAKE_ROOT}/src/rl_autonomy/requirements.txt 2>/dev/null || true
+# Install rl_autonomy (editable)
+RUN ${RL_VENV}/bin/pip install --no-cache-dir -e ${ROVERFLAKE_ROOT} 2>/dev/null || true
 
 # ============================================================================
 # MuJoCo Rendering Configuration

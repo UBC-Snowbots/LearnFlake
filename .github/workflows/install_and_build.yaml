@@ -1,0 +1,74 @@
+# LearnFlake CI: Ubuntu 24.04 + ROS 2 Jazzy, build the workspace and run the
+# pytest suite. Modelled on RoverFlake2's .github/workflows/install_and_build.yaml
+# (runs-on ubuntu-24.04, clones rovercli). ROS is installed with rovercli's own
+# ROS installer script; `rovercli setup` itself is RoverFlake2-specific (it clones
+# RoverFlake2 and expects its network_stuff/ folder), so it is not used here.
+name: Install, build, and test (Jazzy / 24.04)
+
+on: push
+
+jobs:
+  setup_build_test:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout LearnFlake
+        uses: actions/checkout@v4
+        with:
+          path: 'LearnFlake'
+          submodules: false   # RoboSuite is cloned over HTTPS below
+
+      - name: Clone rovercli (team setup tool)
+        uses: actions/checkout@v4
+        with:
+          repository: 'UBC-Snowbots/rovercli'
+          path: 'rovercli'
+
+      - name: Github setup
+        run: |
+          echo "ROVERFLAKE_ROOT=$GITHUB_WORKSPACE/LearnFlake" >> "$GITHUB_ENV"
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      - name: Install ROS 2 Jazzy (rovercli's ROS installer)
+        env:
+          ROVERCLI_ROOT: ${{ github.workspace }}/rovercli/rovercli
+          ROS_DISTRO: jazzy
+          ROS_INSTALL: ros-jazzy-ros-base
+        run: bash rovercli/rovercli/setup_scripts/install-ros2.sh
+
+      - name: Headless OpenGL for MuJoCo (no GPU on the runner)
+        run: sudo apt-get install -y libegl1 libegl-mesa0 libgl1-mesa-dri libgles2
+
+      - name: Populate RoboSuite submodule (HTTPS)
+        run: |
+          cd $GITHUB_WORKSPACE/LearnFlake
+          git submodule update --init src/external_pkgs/RoboSuite
+
+      - name: Create RL venv and install deps
+        run: |
+          cd $GITHUB_WORKSPACE/LearnFlake
+          python3 -m venv .venv --system-site-packages
+          . .venv/bin/activate
+          pip install --upgrade pip setuptools wheel
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install "numpy==1.26.4" "scipy==1.15.3" "numba==0.65.1" \
+            "mujoco==3.9.0" "gymnasium==1.3.0" "stable-baselines3>=2.7,<3" \
+            "sb3-contrib>=2.7,<3" "dm-control==1.0.41" "h5py==3.16.0" \
+            "tensorboard==2.20.0" "PyYAML>=6.0" "mink==0.0.5" "qpsolvers==4.12.0" \
+            "pytest>=7.4" "pytest-cov>=4.1" "coverage>=7.10" "ruff>=0.4"
+          pip install -e src/external_pkgs/RoboSuite
+          pip install -e .
+
+      - name: Colcon build
+        run: |
+          cd $GITHUB_WORKSPACE/LearnFlake
+          source /opt/ros/jazzy/setup.bash
+          # only the ROS packages: colcon must not scan the repo root (the RL package's setup.py is not a
+          # ROS package and breaks colcon's package identification)
+          colcon build --base-paths src/external_pkgs --packages-up-to serial moteus_msgs moteus_control \
+            --parallel-workers 4
+
+      - name: Run tests
+        run: |
+          cd $GITHUB_WORKSPACE/LearnFlake
+          . .venv/bin/activate
+          MUJOCO_GL=egl python3 -m pytest tests/ -q

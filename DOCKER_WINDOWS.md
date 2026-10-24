@@ -1,6 +1,6 @@
-# Docker Setup for Windows (Ubuntu 22.04 LTS)
+# Docker Setup for Windows (Ubuntu 24.04 LTS)
 
-This guide covers running LearnFlake (ROS2 Humble + RoboSuite) on Windows using Docker Desktop with WSL2.
+This guide covers running LearnFlake (ROS2 Jazzy + RoboSuite) on Windows using Docker Desktop with WSL2.
 
 ## Prerequisites
 
@@ -98,7 +98,7 @@ docker compose -f docker-compose.ubuntu.yml build --no-cache
 
 ### Source ROS2 environment (auto-done by entrypoint)
 ```bash
-source /opt/ros/humble/setup.bash
+source /opt/ros/jazzy/setup.bash
 ```
 
 ### Build the workspace
@@ -168,7 +168,7 @@ export DISPLAY=:0
 ### Container can't see GPU
 ```bash
 # Verify GPU is visible
-docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu22.04 nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.8.0-base-ubuntu24.04 nvidia-smi
 ```
 
 ### Build fails at RoboSuite installation
@@ -189,7 +189,7 @@ pip install -e /LearnFlake/src/external_pkgs/RoboSuite
 
 ```
 LearnFlake/
-├── Dockerfile.ubuntu           # Ubuntu 22.04 LTS Dockerfile
+├── Dockerfile.ubuntu           # Ubuntu 24.04 LTS Dockerfile
 ├── docker-compose.ubuntu.yml   # Windows-optimized compose file
 ├── docker/
 │   └── entrypoint.sh          # Container startup script
