@@ -1,8 +1,8 @@
 # LearnFlake CI: Ubuntu 24.04 + ROS 2 Jazzy, build the workspace and run the
 # pytest suite. Modelled on RoverFlake2's .github/workflows/install_and_build.yaml
-# (runs-on ubuntu-24.04, clones rovercli, `main.py setup --distro jazzy`).
-#
-# NOTE: this is committed for the migration but has not been run here (no push).
+# (runs-on ubuntu-24.04, clones rovercli). ROS is installed with rovercli's own
+# ROS installer script; `rovercli setup` itself is RoverFlake2-specific (it clones
+# RoverFlake2 and expects its network_stuff/ folder), so it is not used here.
 name: Install, build, and test (Jazzy / 24.04)
 
 on: push
@@ -28,10 +28,15 @@ jobs:
           echo "ROVERFLAKE_ROOT=$GITHUB_WORKSPACE/LearnFlake" >> "$GITHUB_ENV"
           git config --global url."https://github.com/".insteadOf "git@github.com:"
 
-      - name: Install ROS 2 Jazzy via rovercli
-        run: |
-          python3 rovercli/main.py setup --distro jazzy --ros-version base \
-            --git-protocol https --cd-roverflake n --dst $GITHUB_WORKSPACE/LearnFlake
+      - name: Install ROS 2 Jazzy (rovercli's ROS installer)
+        env:
+          ROVERCLI_ROOT: ${{ github.workspace }}/rovercli/rovercli
+          ROS_DISTRO: jazzy
+          ROS_INSTALL: ros-jazzy-ros-base
+        run: bash rovercli/rovercli/setup_scripts/install-ros2.sh
+
+      - name: Headless OpenGL for MuJoCo (no GPU on the runner)
+        run: sudo apt-get install -y libegl1 libegl-mesa0 libgl1-mesa-dri libgles2
 
       - name: Populate RoboSuite submodule (HTTPS)
         run: |
