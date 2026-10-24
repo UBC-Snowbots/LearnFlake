@@ -71,7 +71,3 @@ tests pass, `torch.cuda.is_available()` True, GPU matmul on sm_120 works.
 inside the container won't work directly (torch needs the cu128 index) — follow
 the command block above, or just `docker compose up -d rover_gpu` now that the
 env is in the image.
-
-# aaron's notes
-claude --resume 293deeb6-fd5f-4d23-8596-e94ec247f3a9
-
