@@ -1,3 +1,8 @@
+> **LearnFlake (MuJoCo typing) is kept here as is and is no longer actively
+> developed** (note added 2026-11-22 PT). New Isaac Sim typing work and the
+> Orion gesture work continue in
+> [UBC-Snowbots/LearnFlake2](https://github.com/UBC-Snowbots/LearnFlake2).
+
 # LearnFlake
 
 LearnFlake teaches the UBC Snowbots Rover2026 arm to type. A 6-DOF arm with a
